@@ -14,6 +14,10 @@ Copie `.env.example` para `.env`, preencha as variáveis e proteja o arquivo com
 
 A chave da OpenAI pode ser fornecida por sessão na interface ou em `OPENAI_API_KEY` no servidor. Use HTTPS para o login e para enviar a chave. Cada geração e edição utiliza os créditos da chave correspondente. A aplicação estima o custo com os tokens informados na resposta. A galeria é armazenada em IndexedDB por conta, navegador e domínio. Imagens do endereço anterior permanecem lá e podem ser baixadas e enviadas ao novo endereço.
 
+**Selecionar objeto** usa o MagicTouch do MediaPipe no navegador. O primeiro uso baixa o modelo e o runtime do próprio estúdio. Clique no objeto e refine o contorno com o pincel, a borracha ou a proteção. O build baixa e verifica o modelo antes de empacotá-lo.
+
+**Sortear ideia** usa a chave da sessão ou do servidor para gerar um prompt em português com GPT-6.2 Sol. Cada clique usa créditos de texto. O painel de custos acompanha as operações de imagem.
+
 ## Desenvolvimento
 
 Com Node.js 24, execute `npm ci`, configure o ambiente em `.env.local` e execute `npm run dev`. Para verificar, rode `npm test` e `npm run build`. O diretório `lib/studio` contém a integração da API, o cálculo de custos e a persistência da galeria.

@@ -1,7 +1,9 @@
 import type {Point, Region} from './region';
 
 export type Tool = 'rectangle' | 'edit' | 'protect' | 'erase';
-export type Mark = {tool: Tool; diameter: number; points: Point[]};
+export type Stroke = {tool: Tool; diameter: number; points: Point[]};
+export type ObjectMark = {tool:'object'; mask:HTMLCanvasElement; width:number; height:number};
+export type Mark = Stroke | ObjectMark;
 export type Selection = {marks: Mark[]; feather: number};
 export const emptySelection: Selection = {marks: [], feather: 0};
 
@@ -15,6 +17,11 @@ export function canvasContext(width: number, height: number) {
 }
 
 function paint(ctx: CanvasRenderingContext2D, mark: Mark) {
+  if (mark.tool === 'object') {
+    // The preview and the exported stencil use the same raster alpha.
+    ctx.drawImage(mark.mask, 0, 0, mark.width, mark.height);
+    return;
+  }
   const [a] = mark.points;
   const b = mark.points[mark.points.length - 1];
   if (mark.tool === 'rectangle') {
@@ -44,7 +51,7 @@ export function renderLayer(ctx: CanvasRenderingContext2D, marks: Mark[], protec
 }
 
 export function editMask(width: number, height: number, selection: Selection) {
-  const editable = selection.marks.some(m => m.tool === 'edit' || m.tool === 'rectangle');
+  const editable = selection.marks.some(m => m.tool === 'object' || m.tool === 'edit' || m.tool === 'rectangle');
   const ctx = canvasContext(width, height);
   if (editable) renderLayer(ctx, selection.marks, false, 'white');
   else ctx.fillRect(0, 0, width, height);

@@ -35,6 +35,7 @@ export default function Studio({account}:{account:string}){
   const [size,setSize]=useState('1024x1024'),[quality,setQuality]=useState('medium');
   const [reference,setReference]=useState<Source|null>(null),[print,setPrint]=useState<Source|null>(null);
   const [photos,setPhotos]=useState<ReferencePhoto[]>([]);
+  const [selecting,setSelecting]=useState(false);
   const [selection,setSelection]=useState<{blob:Blob;region:Selection}|null>(null);
   const region=mode==='edit' && selection && selection.blob===reference?.blob ? selection.region : null;
   const attachment=mode==='edit'?reference:print;
@@ -44,6 +45,9 @@ export default function Studio({account}:{account:string}){
   const [apiOpen,setApiOpen]=useState(false),[help,setHelp]=useState(false),[full,setFull]=useState(false);
   const [key,setKey]=useState(''),[keyDraft,setKeyDraft]=useState(''),[serverKey,setServerKey]=useState(false);
   const [checking,setChecking]=useState(false),[connectError,setConnectError]=useState('');
+  const [drawingIdea,setDrawingIdea]=useState(false);
+  const ideaRequest=useRef<AbortController|null>(null),recentIdeas=useRef<string[]>([]);
+  useEffect(()=>()=>{ideaRequest.current?.abort()},[mode,page]);
   const [example,setExample]=useState<number|null>(null);
   const file=useRef<HTMLInputElement>(null),area=useRef<HTMLTextAreaElement>(null),resultPanel=useRef<HTMLElement>(null);
   const selected=items.find(v=>v.id===current);
@@ -94,6 +98,29 @@ export default function Studio({account}:{account:string}){
     try{const k=keyDraft.trim();const r=await fetch('/img_editor/api/connect',{method:'POST',headers:{'x-lume-key':k,'x-lume-account':account}});const j=await r.json() as {error?:string};if(!r.ok)throw Error(j.error||'Falha ao conectar.');setKey(k);setKeyDraft('');setApiOpen(false);setMessage('API conectada. O estúdio está pronto.')}
     catch(e){setConnectError(e instanceof Error?e.message:'Não foi possível conectar.')}finally{setChecking(false)}
   }
+  async function drawIdea() {
+    if (ideaRequest.current || busy) return;
+    if (!connected) {openApi();return}
+    const controller=new AbortController();
+    ideaRequest.current=controller;
+    setDrawingIdea(true);setWarning('');
+    try {
+      const response=await fetch('/img_editor/api/idea',{
+        method:'POST', signal:controller.signal,
+        headers:{'Content-Type':'application/json','x-lume-account':account,...(key?{'x-lume-key':key}:{})},
+        body:JSON.stringify({recent:recentIdeas.current}),
+      });
+      const result=await response.json();
+      if (!response.ok || !result.idea) throw Error(result.error || 'Não foi possível sortear a ideia.');
+      if (controller.signal.aborted) return;
+      recentIdeas.current=[...recentIdeas.current,result.idea].slice(-6);
+      setDrafts(prev=>prev.create===prompt ? {...prev,create:result.idea} : prev);
+    } catch(error) {
+      if (!controller.signal.aborted) setWarning(error instanceof Error?error.message:'Não foi possível sortear a ideia.');
+    } finally {
+      ideaRequest.current=null;setDrawingIdea(false);
+    }
+  }
   async function requestImage(body:FormData) {
       const r=await fetch('/img_editor/api/images',{method:'POST',headers:{...(key?{'x-lume-key':key}:{}),'x-lume-account':account},body});
       const data=await r.json().catch(()=>({error:'O servidor não devolveu a imagem. Confira seu uso na OpenAI antes de repetir.'})) as {image?:string;error?:string;receipt?:Receipt|null};if(!r.ok||!data.image)throw Error(data.error||'Geração incompleta.');
@@ -141,7 +168,7 @@ export default function Studio({account}:{account:string}){
     } finally {lock.current=false;setBusy(false)}
   }
   async function run(e:FormEvent){
-    e.preventDefault();if(lock.current)return;setWarning('');
+    e.preventDefault();if(lock.current||selecting||drawingIdea)return;setWarning('');
     if(mode==='edit'&&!reference){setWarning('Adicione a imagem que deseja editar.');return}
     if(!prompt.trim()&&!(mode==='create'&&print)){setWarning(mode==='edit'?'Descreva a alteração que deseja fazer.':'Escreva um prompt ou adicione um print da conversa.');area.current?.focus();return}
     if(!connected){openApi();return}
@@ -186,15 +213,16 @@ export default function Studio({account}:{account:string}){
           {mode==='edit'&&!reference&&<button type="button" className="upload" onClick={()=>file.current?.click()} disabled={busy}><Upload size={18}/>Enviar ou colar foto principal <small>PNG, JPG, WebP · até 20 MB</small></button>}
           {mode==='edit' && reference && <button type="button" disabled={busy} className="secondary frame-open"
             onClick={()=>{setFrameError('');setFraming(true)}}><Ratio/>Enquadrar foto</button>}
-          {mode==='edit' && reference && <RegionPicker blob={reference.blob} region={region} disabled={busy} onChange={value=>setSelection(value ? {blob:reference.blob, region:value} : null)}/>}
+          {mode==='edit' && reference && <RegionPicker onPending={setSelecting} blob={reference.blob} region={region} disabled={busy} onChange={value=>setSelection(value ? {blob:reference.blob, region:value} : null)}/>}
           {mode==='edit' && reference && <ReferencePhotos photos={photos} disabled={busy} onChange={setPhotos} onWarning={setWarning}/>}
-          <div className="field-title"><label htmlFor="prompt"><AlignLeft/>{mode==='edit'?(region?'Instruções para a área selecionada':'Instruções de edição'):'Seu prompt'}</label>{mode==='create'&&<button className="idea" type="button" disabled={busy} onClick={()=>{const options=examples.filter(x=>x.prompt!==prompt);setPrompt(options[Math.floor(Math.random()*options.length)].prompt);area.current?.focus()}}><Shuffle/>Sortear ideia</button>}</div>
+          <div className="field-title"><label htmlFor="prompt"><AlignLeft/>{mode==='edit'?(region?'Instruções para a área selecionada':'Instruções de edição'):'Seu prompt'}</label>{mode==='create'&&<button className="idea" type="button" disabled={busy||drawingIdea} onClick={drawIdea}
+            title="Gerar uma sugestão com GPT-6.2 Sol">{drawingIdea?<LoaderCircle className="spin"/>:<Shuffle/>}{drawingIdea?'Sorteando…':'Sortear ideia'}</button>}</div>
           <div className="prompt-box"><textarea id="prompt" ref={area} value={prompt} maxLength={12000} disabled={busy} onChange={e=>setPrompt(e.target.value)} placeholder={mode==='edit'?'O que você gostaria de mudar nesta imagem?':print?'Acrescente detalhes ao pedido do print (opcional)…':'Descreva a imagem que você imagina…'} onKeyDown={e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();e.currentTarget.form?.requestSubmit()}}}/>
           <div className="prompt-tools">{attachment?<div className="attached"><BlobImage blob={attachment.blob} alt={mode==='edit'?'Foto principal':'Print anexado'}/><span>{mode==='edit'?'Principal · ':''}{attachment.name}</span><button type="button" disabled={busy} aria-label="Remover anexo" onClick={()=>{if(mode==='edit'){setReference(null);setPhotos([]);setSelection(null)}else setPrint(null)}}><X size={13}/></button></div>:<button type="button" className="attach" disabled={busy} onClick={()=>file.current?.click()}><Plus size={14}/>{mode==='create'?'Adicionar print':'Adicionar imagem'}</button>}<small>{prompt.length.toLocaleString('pt-BR')} / 12.000</small></div></div>
           <div className="options"><label><span><Ratio/>Proporção</span><div className="select"><select disabled={busy || !!region} value={region ? "original" : size} onChange={e=>setSize(e.target.value)}>{region && <option value="original">Original da foto</option>}{Object.entries(dims).map(([k,v])=><option value={k} key={k}>{v}</option>)}</select><ChevronDown/></div></label><label><span><SlidersHorizontal/>Qualidade</span><div className="select"><select disabled={busy} value={quality} onChange={e=>setQuality(e.target.value)}>{Object.entries(qlabels).map(([k,v])=><option value={k} key={k}>{v}</option>)}</select><ChevronDown/></div></label></div>
           <div className="composer-cost"><span><Coins size={15}/>{editingRoot?'Acumulado da conversa':'Nova conversa'}</span><strong>{costLabel(composerCost)}</strong></div>
           {warning&&<p className="error" role="alert">{warning}</p>}
-          <button className="primary generate" disabled={busy}>{busy?<LoaderCircle className="spin"/>:<WandSparkles/>}{busy?'Criando sua imagem…':mode==='edit'?(region?'Editar área selecionada':'Aplicar edição'):'Gerar imagem'}<ArrowRight className="end"/></button>
+          <button className="primary generate" disabled={busy||selecting||drawingIdea}>{busy?<LoaderCircle className="spin"/>:<WandSparkles/>}{busy?'Criando sua imagem…':mode==='edit'?(region?'Editar área selecionada':'Aplicar edição'):'Gerar imagem'}<ArrowRight className="end"/></button>
         </form></section>
       <aside className="card inspire"><div className="panel-title"><div className="tileicon"><Aperture/></div><div><h2>Inspiração</h2><p>Explore um estilo para começar.</p></div></div>
         <div className="examples">{examples.map((ex,i)=><button key={ex.id} disabled={busy} className="example" onClick={()=>setExample(i)}><img src={'/img_editor/art/'+ex.id+'.webp'} alt=""/><div className="ex-label"><small>{ex.category}</small><b>{ex.title}</b></div><span className="ex-arrow"><ArrowUpRight/></span></button>)}</div>
