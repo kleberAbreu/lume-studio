@@ -7,7 +7,9 @@ import {listVersions, saveVersions, type Version} from '../lib/studio/gallery';
 import {conversationCost, costLabel, dollars, type Receipt} from '../lib/studio/costs';
 import {CostPanel} from './cost-panel';
 import {RegionPicker} from './region-picker';
-import {prepareRegion, type Region} from '../lib/studio/region';
+import {prepareRegion} from '../lib/studio/region';
+import type {Selection} from '../lib/studio/paint';
+import {VersionCompare} from './version-compare';
 type Mode='create'|'edit';
 type Source={blob:Blob;name:string;version?:Version};
 const dims:Record<string,string>={'1024x1024':'Quadrado (1:1)','1536x1024':'Paisagem (3:2)','1024x1536':'Retrato (2:3)'};
@@ -32,7 +34,7 @@ export default function Studio({account}:{account:string}){
   const setPrompt=(value:string)=>setDrafts(x=>({...x,[mode]:value}));
   const [size,setSize]=useState('1024x1024'),[quality,setQuality]=useState('medium');
   const [reference,setReference]=useState<Source|null>(null),[print,setPrint]=useState<Source|null>(null);
-  const [selection,setSelection]=useState<{blob:Blob;region:Region}|null>(null);
+  const [selection,setSelection]=useState<{blob:Blob;region:Selection}|null>(null);
   const region=mode==='edit' && selection && selection.blob===reference?.blob ? selection.region : null;
   const attachment=mode==='edit'?reference:print;
   const [items,setItems]=useState<Version[]>([]),[current,setCurrent]=useState<string|null>(null);
@@ -44,6 +46,8 @@ export default function Studio({account}:{account:string}){
   const [example,setExample]=useState<number|null>(null);
   const file=useRef<HTMLInputElement>(null),area=useRef<HTMLTextAreaElement>(null),resultPanel=useRef<HTMLElement>(null);
   const selected=items.find(v=>v.id===current);
+  const [compare,setCompare]=useState(false);
+  const parentVersion=selected?.parent ? items.find(v=>v.id===selected.parent) : undefined;
   const family=items.filter(v=>v.root===selected?.root).sort((a,b)=>a.created-b.created);
   const editingRoot=mode==='edit'?reference?.version?.root:undefined;
   const composerCost=conversationCost(editingRoot?items.filter(v=>v.root===editingRoot):[]);
@@ -67,7 +71,7 @@ export default function Studio({account}:{account:string}){
     setWarning('');setMessage(mode==='edit'?'Imagem pronta para editar.':'Print de prompt adicionado.');
   }
   useEffect(()=>{
-    function paste(e:ClipboardEvent){if(page!=='studio'||apiOpen||help||example!==null||full||busy)return;const f=Array.from(e.clipboardData?.items||[]).find(i=>i.kind==='file'&&i.type.startsWith('image/'))?.getAsFile();if(f){e.preventDefault();receive(f)}}
+    function paste(e:ClipboardEvent){if(page!=='studio'||apiOpen||help||example!==null||full||compare||busy)return;const f=Array.from(e.clipboardData?.items||[]).find(i=>i.kind==='file'&&i.type.startsWith('image/'))?.getAsFile();if(f){e.preventDefault();receive(f)}}
     window.addEventListener('paste',paste);return()=>window.removeEventListener('paste',paste);
   });
   function switchMode(m:Mode){setMode(m);setWarning('')}
@@ -145,7 +149,7 @@ export default function Studio({account}:{account:string}){
       <aside className="card inspire"><div className="panel-title"><div className="tileicon"><Aperture/></div><div><h2>Inspiração</h2><p>Explore um estilo para começar.</p></div></div>
         <div className="examples">{examples.map((ex,i)=><button key={ex.id} disabled={busy} className="example" onClick={()=>setExample(i)}><img src={'/img_editor/art/'+ex.id+'.webp'} alt=""/><div className="ex-label"><small>{ex.category}</small><b>{ex.title}</b></div><span className="ex-arrow"><ArrowUpRight/></span></button>)}</div>
       </aside></div>
-      {selected&&<section ref={resultPanel} className="card result"><div className="result-header"><div><p className="eyebrow">RESULTADO</p><h2>{selected.original?'Imagem original':'Sua imagem'}</h2></div><button className="secondary" onClick={()=>download(selected)}><Download/>Baixar</button></div><div className="result-layout"><button className="canvas" onClick={()=>setFull(true)} aria-label="Ampliar imagem"><BlobImage blob={selected.blob} alt={selected.prompt}/><Maximize2/></button><div className="details"><CostPanel version={selected} family={family}/><h3><History/>Histórico de versões</h3><p>Escolha uma versão para continuar a edição.</p><div className="versions">{family.map((v,i)=><button key={v.id} className={selected.id===v.id?'chosen':''} onClick={()=>setCurrent(v.id)}><span><BlobImage blob={v.blob} alt=""/></span><div><b>{v.original?'Original':'Versão '+(i+1)}</b><small>{v.parent?'A partir de V'+(family.findIndex(x=>x.id===v.parent)+1):'Ponto de partida'}</small></div><small className="version-amount">{v.original?'Envio local':v.receipt?dollars(v.receipt.nanoUsd):'Sem dados'}</small>{selected.id===v.id&&<Check size={16}/>}</button>)}</div><p className="versionprompt">{selected.prompt}</p><button disabled={busy} className="primary" onClick={()=>startEdit(selected)}><PencilLine/>Editar esta versão</button></div></div></section>}
+      {selected&&<section ref={resultPanel} className="card result"><div className="result-header"><div><p className="eyebrow">RESULTADO</p><h2>{selected.original?'Imagem original':'Sua imagem'}</h2></div><div className="mask-tools">{parentVersion&&<button className="secondary" onClick={()=>setCompare(true)}>Comparar antes/depois</button>}<button className="secondary" onClick={()=>download(selected)}><Download/>Baixar</button></div></div><div className="result-layout"><button className="canvas" onClick={()=>setFull(true)} aria-label="Ampliar imagem"><BlobImage blob={selected.blob} alt={selected.prompt}/><Maximize2/></button><div className="details"><CostPanel version={selected} family={family}/><h3><History/>Histórico de versões</h3><p>Escolha uma versão para continuar a edição.</p><div className="versions">{family.map((v,i)=><button key={v.id} className={selected.id===v.id?'chosen':''} onClick={()=>setCurrent(v.id)}><span><BlobImage blob={v.blob} alt=""/></span><div><b>{v.original?'Original':'Versão '+(i+1)}</b><small>{v.parent?'A partir de V'+(family.findIndex(x=>x.id===v.parent)+1):'Ponto de partida'}</small></div><small className="version-amount">{v.original?'Envio local':v.receipt?dollars(v.receipt.nanoUsd):'Sem dados'}</small>{selected.id===v.id&&<Check size={16}/>}</button>)}</div><p className="versionprompt">{selected.prompt}</p><button disabled={busy} className="primary" onClick={()=>startEdit(selected)}><PencilLine/>Editar esta versão</button></div></div></section>}
     </>:<><div className="gallery-head"><span className="modeltag"><Layers3 size={13}/>HISTÓRICO LOCAL</span><h1>Minha galeria</h1><p>Suas criações e versões salvas neste navegador.</p></div>
     {roots.length?<div className="gallery">{roots.map(root=>{const group=items.filter(v=>v.root===root).sort((a,b)=>b.created-a.created);const v=group[0];const title=group.find(image=>image.id===root)?.title||v.title;return <button key={root} className="card gallery-item" onClick={()=>openVersion(v.id)}><BlobImage blob={v.blob} alt={v.title}/><div><small>{group.length} {group.length===1?'versão':'versões'} · {date(v.created)}</small><h3>{title}</h3><div className="gallery-cost"><span><Coins size={13}/>Custo estimado</span><strong>{costLabel(conversationCost(group))}</strong></div></div></button>})}</div>:<div className="card empty"><Images size={35}/><h2>Sua galeria começa aqui</h2><p>As imagens que você gerar e editar aparecerão aqui.</p><button className="primary" onClick={showStudio}><Plus/>Criar imagem</button></div>}</>}
     <footer><form method="post" action="/img_editor/api/logout"><button>Sair · {account}</button></form><span><span className="footer-mark">✧</span>Lume Studio</span><button onClick={()=>setHelp(true)}><CircleHelp size={14}/>Como funciona</button></footer>
@@ -155,6 +159,7 @@ export default function Studio({account}:{account:string}){
     <form onSubmit={connect}><label className="modal-label" htmlFor="secret">Chave da API</label><input id="secret" type="password" autoComplete="off" value={keyDraft} placeholder="sk-…" required disabled={checking} onChange={e=>setKeyDraft(e.target.value)}/><small>A chave fica em memória nesta aba e segue ao servidor somente para acessar a OpenAI. Ao recarregar, ela é descartada.</small>{connectError&&<p role="alert" className="error">{connectError}</p>}<button className="primary" disabled={checking}>{checking?<LoaderCircle className="spin"/>:<KeyRound/>}{checking?'Verificando…':key?'Trocar chave':'Conectar chave'}</button></form><div className="dialog-links"><a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">Gerenciar chaves <ArrowUpRight size={14}/></a>{key&&<button onClick={()=>{setKey('');setKeyDraft('');setApiOpen(false);setMessage('Chave da sessão removida.')}}><Unplug size={14}/>Desconectar</button>}</div></Dialog>}
     {example!==null&&<Dialog title={examples[example].title} onClose={()=>setExample(null)}><img className="samplelarge" src={'/img_editor/art/'+examples[example].id+'.webp'} alt={examples[example].title}/><p>{examples[example].prompt}</p><button className="primary" onClick={()=>useExample(example)}><Sparkles/>Usar este prompt</button></Dialog>}
     {help&&<Dialog title="Como usar o estúdio" onClose={()=>setHelp(false)}><p><strong>Gerar.</strong> Escreva o que deseja criar ou adicione um print de uma conversa com o prompt. Você também pode colar um print diretamente na página.</p><p><strong>Editar.</strong> Envie uma imagem e descreva as mudanças. Para refinar um resultado, selecione “Editar esta versão”.</p><p><strong>Explorar versões.</strong> Abra uma criação na galeria e escolha qualquer versão do histórico para iniciar uma nova variação.</p><p><strong>Custos em dólares.</strong> Cada criação inicia uma conversa. O total soma a geração e todas as suas edições, inclusive variações de versões anteriores. O contador usa o consumo informado nas imagens concluídas e as tarifas padrão do modelo. Consulte o faturamento da OpenAI para créditos, descontos ou pedidos interrompidos.</p><p><strong>Guardar.</strong> A galeria fica neste navegador. Use “Baixar” para guardar uma cópia do arquivo.</p></Dialog>}
+    {compare&&selected&&parentVersion&&<Dialog wide title="Antes e depois" onClose={()=>setCompare(false)}><VersionCompare before={parentVersion.blob} after={selected.blob}/></Dialog>}
     {full&&selected&&<Dialog title={selected.original?'Imagem original':'Visualização da imagem'} wide onClose={()=>setFull(false)}><div className="full"><BlobImage blob={selected.blob} alt={selected.prompt}/></div><button className="secondary" onClick={()=>download(selected)}><Download/>Baixar imagem</button></Dialog>}
   </>
 }
