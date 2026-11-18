@@ -6,6 +6,8 @@ import {examples} from '../lib/studio/examples';
 import {listVersions, saveVersions, type Version} from '../lib/studio/gallery';
 import {conversationCost, costLabel, dollars, type Receipt} from '../lib/studio/costs';
 import {CostPanel} from './cost-panel';
+import {RegionPicker} from './region-picker';
+import {prepareRegion, type Region} from '../lib/studio/region';
 type Mode='create'|'edit';
 type Source={blob:Blob;name:string;version?:Version};
 const dims:Record<string,string>={'1024x1024':'Quadrado (1:1)','1536x1024':'Paisagem (3:2)','1024x1536':'Retrato (2:3)'};
@@ -30,6 +32,8 @@ export default function Studio({account}:{account:string}){
   const setPrompt=(value:string)=>setDrafts(x=>({...x,[mode]:value}));
   const [size,setSize]=useState('1024x1024'),[quality,setQuality]=useState('medium');
   const [reference,setReference]=useState<Source|null>(null),[print,setPrint]=useState<Source|null>(null);
+  const [selection,setSelection]=useState<{blob:Blob;region:Region}|null>(null);
+  const region=mode==='edit' && selection && selection.blob===reference?.blob ? selection.region : null;
   const attachment=mode==='edit'?reference:print;
   const [items,setItems]=useState<Version[]>([]),[current,setCurrent]=useState<string|null>(null);
   const [busy,setBusy]=useState(false),lock=useRef(false);
@@ -59,7 +63,7 @@ export default function Studio({account}:{account:string}){
     if(busy)return;
     if(!['image/png','image/jpeg','image/webp'].includes(blob.type)||blob.size>20*1024*1024||!blob.size){setWarning('Escolha um PNG, JPEG ou WebP de até 20 MB.');return}
     const next={blob,name:blob.name||'Imagem colada'};
-    if(mode==='edit')setReference(next);else setPrint(next);
+    if(mode==='edit'){setSelection(null);setReference(next)}else setPrint(next);
     setWarning('');setMessage(mode==='edit'?'Imagem pronta para editar.':'Print de prompt adicionado.');
   }
   useEffect(()=>{
@@ -69,7 +73,7 @@ export default function Studio({account}:{account:string}){
   function switchMode(m:Mode){setMode(m);setWarning('')}
   function showStudio(){setPage('studio');setWarning('')}
   function startEdit(v:Version){
-    setMode('edit');setReference({blob:v.blob,name:v.title,version:v});setDrafts(x=>({...x,edit:''}));setSize(v.size);setPage('studio');setFull(false);setWarning('');
+    setMode('edit');setSelection(null);setReference({blob:v.blob,name:v.title,version:v});setDrafts(x=>({...x,edit:''}));setSize(v.size);setPage('studio');setFull(false);setWarning('');
     setTimeout(()=>{area.current?.focus();area.current?.scrollIntoView({behavior:'smooth',block:'center'})},50);
   }
   function openVersion(id:string){setCurrent(id);setPage('studio');setTimeout(()=>resultPanel.current?.scrollIntoView({behavior:'smooth',block:'start'}),60)}
@@ -90,9 +94,16 @@ export default function Studio({account}:{account:string}){
     lock.current=true;setBusy(true);
     try{
       const body=new FormData();body.set('mode',mode==='edit'?'edit':print?'print':'create');body.set('prompt',prompt.trim());body.set('size',size);body.set('quality',quality);if(attachment)body.set('image',attachment.blob,attachment.name);
+      const localEdit = region && reference ? await prepareRegion(reference.blob, region) : null;
+      if (localEdit) {
+        body.set('image', localEdit.input, 'recorte.png');
+        body.set('mask', localEdit.stencil, 'mascara.png');
+        body.set('size', '1024x1024');
+      }
       const r=await fetch('/img_editor/api/images',{method:'POST',headers:{...(key?{'x-lume-key':key}:{}),'x-lume-account':account},body});
       const data=await r.json().catch(()=>({error:'O servidor não devolveu a imagem. Confira seu uso na OpenAI antes de repetir.'})) as {image?:string;error?:string;receipt?:Receipt|null};if(!r.ok||!data.image)throw Error(data.error||'Geração incompleta.');
-      const blob=await (await fetch('data:image/png;base64,'+data.image)).blob();
+      const generated=await (await fetch('data:image/png;base64,'+data.image)).blob();
+      const blob=localEdit ? await localEdit.compose(generated) : generated;
       const now=Date.now(), id=crypto.randomUUID(), pending:Version[]=[];
       let parent=mode==='edit'?reference?.version:undefined;
       if(mode==='edit'&&reference&&!parent){
@@ -101,7 +112,7 @@ export default function Studio({account}:{account:string}){
       const description=prompt.trim()||(print?'Imagem a partir de '+print.name:'Imagem gerada');
       const v:Version={id,root:parent?.root||id,parent:parent?.id,created:now,prompt:description,size,quality,blob,receipt:data.receipt??null,title:description.length>62?description.slice(0,61)+'…':description};
       pending.push(v);setItems(prev=>[...prev,...pending]);
-      if(mode==='edit'){setReference({blob:v.blob,name:v.title,version:v});setDrafts(x=>({...x,edit:''}));}
+      if(mode==='edit'){setSelection(null);setReference({blob:v.blob,name:v.title,version:v});setDrafts(x=>({...x,edit:''}));}
       openVersion(v.id);
       try{await saveVersions(account,pending);if(typeof BroadcastChannel!=='undefined'){const sync=new BroadcastChannel('lume-versions-'+account);sync.postMessage('saved');sync.close()}setMessage('Imagem salva na galeria deste navegador.')}catch{setWarning('Imagem pronta. O histórico local está indisponível. Baixe a imagem para guardá-la.')}
     }catch(e){setWarning(e instanceof Error?e.message:'Não foi possível concluir a solicitação.')}
@@ -122,13 +133,14 @@ export default function Studio({account}:{account:string}){
         <form onSubmit={run} onDragOver={e=>{e.preventDefault();setDrag(true)}} onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node))setDrag(false)}} onDrop={e=>{e.preventDefault();setDrag(false);if(e.dataTransfer.files[0])receive(e.dataTransfer.files[0])}} className={drag?'drag':''}>
           <input type="file" accept="image/png,image/jpeg,image/webp" ref={file} hidden onChange={e=>{if(e.target.files?.[0])receive(e.target.files[0]);e.target.value=''}}/>
           {mode==='edit'&&!reference&&<button type="button" className="upload" onClick={()=>file.current?.click()} disabled={busy}><Upload size={18}/>Enviar ou colar imagem <small>PNG, JPG, WebP · até 20 MB</small></button>}
-          <div className="field-title"><label htmlFor="prompt"><AlignLeft/>{mode==='edit'?'Instruções de edição':'Seu prompt'}</label>{mode==='create'&&<button className="idea" type="button" disabled={busy} onClick={()=>{const options=examples.filter(x=>x.prompt!==prompt);setPrompt(options[Math.floor(Math.random()*options.length)].prompt);area.current?.focus()}}><Shuffle/>Sortear ideia</button>}</div>
+          {mode==='edit' && reference && <RegionPicker blob={reference.blob} region={region} disabled={busy} onChange={value=>setSelection(value ? {blob:reference.blob, region:value} : null)}/>}
+          <div className="field-title"><label htmlFor="prompt"><AlignLeft/>{mode==='edit'?(region?'Instruções para a área selecionada':'Instruções de edição'):'Seu prompt'}</label>{mode==='create'&&<button className="idea" type="button" disabled={busy} onClick={()=>{const options=examples.filter(x=>x.prompt!==prompt);setPrompt(options[Math.floor(Math.random()*options.length)].prompt);area.current?.focus()}}><Shuffle/>Sortear ideia</button>}</div>
           <div className="prompt-box"><textarea id="prompt" ref={area} value={prompt} maxLength={12000} disabled={busy} onChange={e=>setPrompt(e.target.value)} placeholder={mode==='edit'?'O que você gostaria de mudar nesta imagem?':print?'Acrescente detalhes ao pedido do print (opcional)…':'Descreva a imagem que você imagina…'} onKeyDown={e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();e.currentTarget.form?.requestSubmit()}}}/>
           <div className="prompt-tools">{attachment?<div className="attached"><BlobImage blob={attachment.blob} alt="Referência anexada"/><span>{attachment.name}</span><button type="button" disabled={busy} aria-label="Remover anexo" onClick={()=>mode==='edit'?setReference(null):setPrint(null)}><X size={13}/></button></div>:<button type="button" className="attach" disabled={busy} onClick={()=>file.current?.click()}><Plus size={14}/>{mode==='create'?'Adicionar print':'Adicionar imagem'}</button>}<small>{prompt.length.toLocaleString('pt-BR')} / 12.000</small></div></div>
-          <div className="options"><label><span><Ratio/>Proporção</span><div className="select"><select disabled={busy} value={size} onChange={e=>setSize(e.target.value)}>{Object.entries(dims).map(([k,v])=><option value={k} key={k}>{v}</option>)}</select><ChevronDown/></div></label><label><span><SlidersHorizontal/>Qualidade</span><div className="select"><select disabled={busy} value={quality} onChange={e=>setQuality(e.target.value)}>{Object.entries(qlabels).map(([k,v])=><option value={k} key={k}>{v}</option>)}</select><ChevronDown/></div></label></div>
+          <div className="options"><label><span><Ratio/>Proporção</span><div className="select"><select disabled={busy || !!region} value={region ? "original" : size} onChange={e=>setSize(e.target.value)}>{region && <option value="original">Original da foto</option>}{Object.entries(dims).map(([k,v])=><option value={k} key={k}>{v}</option>)}</select><ChevronDown/></div></label><label><span><SlidersHorizontal/>Qualidade</span><div className="select"><select disabled={busy} value={quality} onChange={e=>setQuality(e.target.value)}>{Object.entries(qlabels).map(([k,v])=><option value={k} key={k}>{v}</option>)}</select><ChevronDown/></div></label></div>
           <div className="composer-cost"><span><Coins size={15}/>{editingRoot?'Acumulado da conversa':'Nova conversa'}</span><strong>{costLabel(composerCost)}</strong></div>
           {warning&&<p className="error" role="alert">{warning}</p>}
-          <button className="primary generate" disabled={busy}>{busy?<LoaderCircle className="spin"/>:<WandSparkles/>}{busy?'Criando sua imagem…':mode==='edit'?'Aplicar edição':'Gerar imagem'}<ArrowRight className="end"/></button>
+          <button className="primary generate" disabled={busy}>{busy?<LoaderCircle className="spin"/>:<WandSparkles/>}{busy?'Criando sua imagem…':mode==='edit'?(region?'Editar área selecionada':'Aplicar edição'):'Gerar imagem'}<ArrowRight className="end"/></button>
         </form></section>
       <aside className="card inspire"><div className="panel-title"><div className="tileicon"><Aperture/></div><div><h2>Inspiração</h2><p>Explore um estilo para começar.</p></div></div>
         <div className="examples">{examples.map((ex,i)=><button key={ex.id} disabled={busy} className="example" onClick={()=>setExample(i)}><img src={'/img_editor/art/'+ex.id+'.webp'} alt=""/><div className="ex-label"><small>{ex.category}</small><b>{ex.title}</b></div><span className="ex-arrow"><ArrowUpRight/></span></button>)}</div>
