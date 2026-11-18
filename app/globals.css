@@ -43,3 +43,16 @@ dialog{width:min(450px,calc(100% - 28px));max-height:90dvh;overflow:auto;padding
 .reference-row span {overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px}
 .reference-row select {background:#211c27; color:inherit; border:1px solid var(--line); border-radius:6px; padding:6px}
 .reference-row button {display:grid; place-items:center; padding:6px}
+.frame-open {margin:0 0 15px}
+.frame-editor {border:0; padding:0; margin:0; min-width:0}
+.frame-editor label {display:grid; gap:6px; font-size:13px}
+.frame-editor select {padding:9px; border-radius:7px; border:1px solid var(--line); color:inherit; background:#211c27}
+.frame-modes {display:flex; gap:8px; margin:14px 0}
+.frame-modes button {border:1px solid var(--line); color:inherit; border-radius:7px; padding:7px 12px}
+.frame-modes button[aria-pressed=true] {border-color:var(--violet); background:#463453}
+.frame-stage {position:relative; width:100%; margin:auto; overflow:hidden; touch-action:none; cursor:grab; background:repeating-conic-gradient(#302a34 0 25%, #423848 0 50%) 0 0 / 20px 20px}
+.frame-stage:active {cursor:grabbing}
+.frame-stage img {position:absolute; max-width:none; max-height:none; user-select:none; pointer-events:none}
+.frame-adjust {display:flex; flex-wrap:wrap; gap:14px; margin:12px 0 16px}
+.frame-adjust label {flex:1 1 120px}
+.frame-adjust input[type=range] {padding:0; accent-color:var(--violet)}

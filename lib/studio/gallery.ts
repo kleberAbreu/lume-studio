@@ -1,5 +1,5 @@
 import type {Receipt} from './costs';
-export type Version = {id:string; root:string; parent?:string; created:number; prompt:string; size:string; quality:string; blob:Blob; title:string; original?:boolean; receipt?:Receipt|null};
+export type Version = {id:string; root:string; parent?:string; created:number; prompt:string; size:string; quality:string; blob:Blob; title:string; original?:boolean; local?:boolean; receipt?:Receipt|null};
 const databases=new Map<string,Promise<IDBDatabase>>();
 function open(account:string){
   let database=databases.get(account);

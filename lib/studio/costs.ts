@@ -38,11 +38,11 @@ export function estimateCost(usage?: Usage | null): Receipt | null {
   if (!Number.isSafeInteger(nanoUsd)) return null;
   return {model, rateDate:'2026-11-17', text, image, output, cachedText, cachedImage, nanoUsd};
 }
-type MeteredVersion = {original?:boolean; receipt?:Receipt | null};
+type MeteredVersion = {original?:boolean; local?:boolean; receipt?:Receipt | null};
 export function conversationCost(versions: MeteredVersion[]) {
   let nanoUsd = 0, known = 0, missing = 0;
   for (const version of versions) {
-    if (version.original) continue;
+    if (version.original || version.local) continue;
     if (version.receipt == null) missing++;
     else {
       known++;

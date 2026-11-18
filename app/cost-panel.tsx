@@ -10,7 +10,7 @@ export function CostPanel({version, family}:{version:Version; family:Version[]})
     <h3><Coins size={16}/>Custo estimado em USD</h3>
     <dl>
       <div><dt>{version.original ? 'Upload do original' : action}</dt>
-        <dd>{version.original ? dollars(0) : receipt ? dollars(receipt.nanoUsd) : 'Sem dados'}</dd></div>
+        <dd>{version.original || version.local ? dollars(0) : receipt ? dollars(receipt.nanoUsd) : 'Sem dados'}</dd></div>
       <div><dt>Conversa inteira</dt><dd>{costLabel(total)}</dd></div>
     </dl>
     {total.missing>0 && <p>{total.missing===1?'1 operação sem dados de consumo.':total.missing+' operações sem dados de consumo.'}</p>}

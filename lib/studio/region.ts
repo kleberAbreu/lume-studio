@@ -19,7 +19,7 @@ export function contextFrame(region: Region, width: number, height: number) {
   return {x: origin(region.x, region.width, width), y: origin(region.y, region.height, height), side};
 }
 
-function png(canvas: HTMLCanvasElement): Promise<Blob> {
+export function png(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) =>
     canvas.toBlob(blob => blob ? resolve(blob) : reject(Error('O navegador não conseguiu salvar a imagem.')), 'image/png')
   );
