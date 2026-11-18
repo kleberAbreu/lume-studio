@@ -10,16 +10,14 @@ import {RegionPicker} from './region-picker';
 import {prepareRegion} from '../lib/studio/region';
 import type {Selection} from '../lib/studio/paint';
 import {VersionCompare} from './version-compare';
+import {BlobImage} from './blob-image';
+import {ReferencePhotos} from './reference-photos';
+import {maxUploadBytes, validImage, type ReferencePhoto} from '../lib/studio/references';
 type Mode='create'|'edit';
 type Source={blob:Blob;name:string;version?:Version};
 const dims:Record<string,string>={'1024x1024':'Quadrado (1:1)','1536x1024':'Paisagem (3:2)','1024x1536':'Retrato (2:3)'};
 const qlabels:Record<string,string>={low:'Rápida',medium:'Padrão',high:'Alta'};
 const date=(n:number)=>new Intl.DateTimeFormat('pt-BR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}).format(n);
-function BlobImage({blob,alt}:{blob:Blob;alt:string}){
-  const [src,setSrc]=useState('');
-  useEffect(()=>{const url=URL.createObjectURL(blob);setSrc(url);return()=>URL.revokeObjectURL(url)},[blob]);
-  return src?<img src={src} alt={alt}/>:null;
-}
 function Dialog({title,onClose,children,wide=false}:{title:string;onClose:()=>void;children:ReactNode;wide?:boolean}){
   const ref=useRef<HTMLDialogElement>(null);
   useEffect(()=>{const d=ref.current;d?.showModal();return()=>d?.close()},[]);
@@ -34,6 +32,7 @@ export default function Studio({account}:{account:string}){
   const setPrompt=(value:string)=>setDrafts(x=>({...x,[mode]:value}));
   const [size,setSize]=useState('1024x1024'),[quality,setQuality]=useState('medium');
   const [reference,setReference]=useState<Source|null>(null),[print,setPrint]=useState<Source|null>(null);
+  const [photos,setPhotos]=useState<ReferencePhoto[]>([]);
   const [selection,setSelection]=useState<{blob:Blob;region:Selection}|null>(null);
   const region=mode==='edit' && selection && selection.blob===reference?.blob ? selection.region : null;
   const attachment=mode==='edit'?reference:print;
@@ -65,9 +64,9 @@ export default function Studio({account}:{account:string}){
   useEffect(()=>{if(message){const timer=setTimeout(()=>setMessage(''),4200);return()=>clearTimeout(timer)}},[message]);
   function receive(blob:File){
     if(busy)return;
-    if(!['image/png','image/jpeg','image/webp'].includes(blob.type)||blob.size>20*1024*1024||!blob.size){setWarning('Escolha um PNG, JPEG ou WebP de até 20 MB.');return}
+    if(!validImage(blob)){setWarning('Escolha um PNG, JPEG ou WebP de até 20 MB.');return}
     const next={blob,name:blob.name||'Imagem colada'};
-    if(mode==='edit'){setSelection(null);setReference(next)}else setPrint(next);
+    if(mode==='edit'){setSelection(null);setPhotos([]);setReference(next)}else setPrint(next);
     setWarning('');setMessage(mode==='edit'?'Imagem pronta para editar.':'Print de prompt adicionado.');
   }
   useEffect(()=>{
@@ -77,7 +76,7 @@ export default function Studio({account}:{account:string}){
   function switchMode(m:Mode){setMode(m);setWarning('')}
   function showStudio(){setPage('studio');setWarning('')}
   function startEdit(v:Version){
-    setMode('edit');setSelection(null);setReference({blob:v.blob,name:v.title,version:v});setDrafts(x=>({...x,edit:''}));setSize(v.size);setPage('studio');setFull(false);setWarning('');
+    setMode('edit');setPhotos([]);setSelection(null);setReference({blob:v.blob,name:v.title,version:v});setDrafts(x=>({...x,edit:''}));setSize(v.size);setPage('studio');setFull(false);setWarning('');
     setTimeout(()=>{area.current?.focus();area.current?.scrollIntoView({behavior:'smooth',block:'center'})},50);
   }
   function openVersion(id:string){setCurrent(id);setPage('studio');setTimeout(()=>resultPanel.current?.scrollIntoView({behavior:'smooth',block:'start'}),60)}
@@ -103,6 +102,15 @@ export default function Studio({account}:{account:string}){
         body.set('image', localEdit.input, 'recorte.png');
         body.set('mask', localEdit.stencil, 'mascara.png');
         body.set('size', '1024x1024');
+      }
+      if (mode === 'edit' && reference && photos.length) {
+        const primaryBytes = localEdit ? localEdit.input.size + localEdit.stencil.size : reference.blob.size;
+        if (photos.reduce((bytes, photo) => bytes + photo.file.size, primaryBytes) > maxUploadBytes)
+          throw Error('A foto principal, a máscara e as referências devem somar até 20 MB.');
+        for (const photo of photos) {
+          body.append('reference', photo.file);
+          body.append('referenceRole', photo.role);
+        }
       }
       const r=await fetch('/img_editor/api/images',{method:'POST',headers:{...(key?{'x-lume-key':key}:{}),'x-lume-account':account},body});
       const data=await r.json().catch(()=>({error:'O servidor não devolveu a imagem. Confira seu uso na OpenAI antes de repetir.'})) as {image?:string;error?:string;receipt?:Receipt|null};if(!r.ok||!data.image)throw Error(data.error||'Geração incompleta.');
@@ -136,11 +144,12 @@ export default function Studio({account}:{account:string}){
         <div className="tabs"><button disabled={busy} aria-pressed={mode==='create'} className={mode==='create'?'selected':''} onClick={()=>switchMode('create')}><Sparkles/>Gerar imagem</button><button disabled={busy} aria-pressed={mode==='edit'} className={mode==='edit'?'selected':''} onClick={()=>switchMode('edit')}><PencilLine/>Editar imagem</button></div>
         <form onSubmit={run} onDragOver={e=>{e.preventDefault();setDrag(true)}} onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node))setDrag(false)}} onDrop={e=>{e.preventDefault();setDrag(false);if(e.dataTransfer.files[0])receive(e.dataTransfer.files[0])}} className={drag?'drag':''}>
           <input type="file" accept="image/png,image/jpeg,image/webp" ref={file} hidden onChange={e=>{if(e.target.files?.[0])receive(e.target.files[0]);e.target.value=''}}/>
-          {mode==='edit'&&!reference&&<button type="button" className="upload" onClick={()=>file.current?.click()} disabled={busy}><Upload size={18}/>Enviar ou colar imagem <small>PNG, JPG, WebP · até 20 MB</small></button>}
+          {mode==='edit'&&!reference&&<button type="button" className="upload" onClick={()=>file.current?.click()} disabled={busy}><Upload size={18}/>Enviar ou colar foto principal <small>PNG, JPG, WebP · até 20 MB</small></button>}
           {mode==='edit' && reference && <RegionPicker blob={reference.blob} region={region} disabled={busy} onChange={value=>setSelection(value ? {blob:reference.blob, region:value} : null)}/>}
+          {mode==='edit' && reference && <ReferencePhotos photos={photos} disabled={busy} onChange={setPhotos} onWarning={setWarning}/>}
           <div className="field-title"><label htmlFor="prompt"><AlignLeft/>{mode==='edit'?(region?'Instruções para a área selecionada':'Instruções de edição'):'Seu prompt'}</label>{mode==='create'&&<button className="idea" type="button" disabled={busy} onClick={()=>{const options=examples.filter(x=>x.prompt!==prompt);setPrompt(options[Math.floor(Math.random()*options.length)].prompt);area.current?.focus()}}><Shuffle/>Sortear ideia</button>}</div>
           <div className="prompt-box"><textarea id="prompt" ref={area} value={prompt} maxLength={12000} disabled={busy} onChange={e=>setPrompt(e.target.value)} placeholder={mode==='edit'?'O que você gostaria de mudar nesta imagem?':print?'Acrescente detalhes ao pedido do print (opcional)…':'Descreva a imagem que você imagina…'} onKeyDown={e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();e.currentTarget.form?.requestSubmit()}}}/>
-          <div className="prompt-tools">{attachment?<div className="attached"><BlobImage blob={attachment.blob} alt="Referência anexada"/><span>{attachment.name}</span><button type="button" disabled={busy} aria-label="Remover anexo" onClick={()=>mode==='edit'?setReference(null):setPrint(null)}><X size={13}/></button></div>:<button type="button" className="attach" disabled={busy} onClick={()=>file.current?.click()}><Plus size={14}/>{mode==='create'?'Adicionar print':'Adicionar imagem'}</button>}<small>{prompt.length.toLocaleString('pt-BR')} / 12.000</small></div></div>
+          <div className="prompt-tools">{attachment?<div className="attached"><BlobImage blob={attachment.blob} alt={mode==='edit'?'Foto principal':'Print anexado'}/><span>{mode==='edit'?'Principal · ':''}{attachment.name}</span><button type="button" disabled={busy} aria-label="Remover anexo" onClick={()=>{if(mode==='edit'){setReference(null);setPhotos([]);setSelection(null)}else setPrint(null)}}><X size={13}/></button></div>:<button type="button" className="attach" disabled={busy} onClick={()=>file.current?.click()}><Plus size={14}/>{mode==='create'?'Adicionar print':'Adicionar imagem'}</button>}<small>{prompt.length.toLocaleString('pt-BR')} / 12.000</small></div></div>
           <div className="options"><label><span><Ratio/>Proporção</span><div className="select"><select disabled={busy || !!region} value={region ? "original" : size} onChange={e=>setSize(e.target.value)}>{region && <option value="original">Original da foto</option>}{Object.entries(dims).map(([k,v])=><option value={k} key={k}>{v}</option>)}</select><ChevronDown/></div></label><label><span><SlidersHorizontal/>Qualidade</span><div className="select"><select disabled={busy} value={quality} onChange={e=>setQuality(e.target.value)}>{Object.entries(qlabels).map(([k,v])=><option value={k} key={k}>{v}</option>)}</select><ChevronDown/></div></label></div>
           <div className="composer-cost"><span><Coins size={15}/>{editingRoot?'Acumulado da conversa':'Nova conversa'}</span><strong>{costLabel(composerCost)}</strong></div>
           {warning&&<p className="error" role="alert">{warning}</p>}
@@ -158,7 +167,7 @@ export default function Studio({account}:{account:string}){
     {apiOpen&&<Dialog title="Conexão com a OpenAI" onClose={()=>{if(!checking){setApiOpen(false);setKeyDraft('')}}}><p>Use uma chave de projeto com acesso ao GPT Image 2.6 Sunburst. Cada geração ou edição usa os créditos desse projeto.</p>{serverKey?<div className="note"><Check/>O servidor já tem uma chave configurada.</div>:null}
     <form onSubmit={connect}><label className="modal-label" htmlFor="secret">Chave da API</label><input id="secret" type="password" autoComplete="off" value={keyDraft} placeholder="sk-…" required disabled={checking} onChange={e=>setKeyDraft(e.target.value)}/><small>A chave fica em memória nesta aba e segue ao servidor somente para acessar a OpenAI. Ao recarregar, ela é descartada.</small>{connectError&&<p role="alert" className="error">{connectError}</p>}<button className="primary" disabled={checking}>{checking?<LoaderCircle className="spin"/>:<KeyRound/>}{checking?'Verificando…':key?'Trocar chave':'Conectar chave'}</button></form><div className="dialog-links"><a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">Gerenciar chaves <ArrowUpRight size={14}/></a>{key&&<button onClick={()=>{setKey('');setKeyDraft('');setApiOpen(false);setMessage('Chave da sessão removida.')}}><Unplug size={14}/>Desconectar</button>}</div></Dialog>}
     {example!==null&&<Dialog title={examples[example].title} onClose={()=>setExample(null)}><img className="samplelarge" src={'/img_editor/art/'+examples[example].id+'.webp'} alt={examples[example].title}/><p>{examples[example].prompt}</p><button className="primary" onClick={()=>useExample(example)}><Sparkles/>Usar este prompt</button></Dialog>}
-    {help&&<Dialog title="Como usar o estúdio" onClose={()=>setHelp(false)}><p><strong>Gerar.</strong> Escreva o que deseja criar ou adicione um print de uma conversa com o prompt. Você também pode colar um print diretamente na página.</p><p><strong>Editar.</strong> Envie uma imagem e descreva as mudanças. Para refinar um resultado, selecione “Editar esta versão”.</p><p><strong>Explorar versões.</strong> Abra uma criação na galeria e escolha qualquer versão do histórico para iniciar uma nova variação.</p><p><strong>Custos em dólares.</strong> Cada criação inicia uma conversa. O total soma a geração e todas as suas edições, inclusive variações de versões anteriores. O contador usa o consumo informado nas imagens concluídas e as tarifas padrão do modelo. Consulte o faturamento da OpenAI para créditos, descontos ou pedidos interrompidos.</p><p><strong>Guardar.</strong> A galeria fica neste navegador. Use “Baixar” para guardar uma cópia do arquivo.</p></Dialog>}
+    {help&&<Dialog title="Como usar o estúdio" onClose={()=>setHelp(false)}><p><strong>Gerar.</strong> Escreva o que deseja criar ou adicione um print de uma conversa com o prompt. Você também pode colar um print diretamente na página.</p><p><strong>Editar.</strong> Envie a foto principal e descreva as mudanças. Você pode anexar fotos de referência e indicar quais devem orientar o rosto, a roupa ou o estilo. Para refinar um resultado, selecione “Editar esta versão”.</p><p><strong>Explorar versões.</strong> Abra uma criação na galeria e escolha qualquer versão do histórico para iniciar uma nova variação.</p><p><strong>Custos em dólares.</strong> Cada criação inicia uma conversa. O total soma a geração e todas as suas edições, inclusive variações de versões anteriores. O contador usa o consumo informado nas imagens concluídas e as tarifas padrão do modelo. Consulte o faturamento da OpenAI para créditos, descontos ou pedidos interrompidos.</p><p><strong>Guardar.</strong> A galeria fica neste navegador. Use “Baixar” para guardar uma cópia do arquivo.</p></Dialog>}
     {compare&&selected&&parentVersion&&<Dialog wide title="Antes e depois" onClose={()=>setCompare(false)}><VersionCompare before={parentVersion.blob} after={selected.blob}/></Dialog>}
     {full&&selected&&<Dialog title={selected.original?'Imagem original':'Visualização da imagem'} wide onClose={()=>setFull(false)}><div className="full"><BlobImage blob={selected.blob} alt={selected.prompt}/></div><button className="secondary" onClick={()=>download(selected)}><Download/>Baixar imagem</button></Dialog>}
   </>
