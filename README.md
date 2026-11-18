@@ -12,7 +12,9 @@ Copie `.env.example` para `.env`, preencha as variáveis e proteja o arquivo com
 
 ## OpenAI e histórico
 
-A chave da OpenAI pode ser fornecida por sessão na interface ou em `OPENAI_API_KEY` no servidor. Use HTTPS para o login e para enviar a chave. Cada geração e edição utiliza os créditos da chave correspondente. A aplicação estima o custo com os tokens informados na resposta. A galeria é armazenada em IndexedDB por conta, navegador e domínio. Imagens do endereço anterior permanecem lá e podem ser baixadas e enviadas ao novo endereço.
+A chave da OpenAI pode ser fornecida por sessão na interface ou em `OPENAI_API_KEY` no servidor. Use HTTPS para o login e para enviar a chave. Cada geração e edição utiliza os créditos da chave correspondente. A aplicação estima o custo com os tokens informados na resposta. A galeria sincroniza versões e rascunhos por conta em SQLite no volume Docker `gallery` (/app/gallery). Mantenha esse volume ao recriar o container e use a API de backup do SQLite para cópias consistentes. Na instalação sem Docker, configure `LUME_GALLERY_DIR` em um disco persistente gravável pelo processo.
+
+Ao abrir o estúdio no navegador e no domínio em que as imagens antigas foram criadas, a conta autenticada envia o histórico local ao VPS. Falhas de conexão permitem nova tentativa. No outro aparelho, entre na mesma conta e abra a galeria. “Salvar rascunho” guarda a imagem, o prompt, as seleções, as referências e a qualidade. Links de foto abrem apenas a versão escolhida. Links de projeto mostram as imagens atuais e futuras desse projeto. O titular pode desativá-los em “Compartilhar”.
 
 **Selecionar objeto** usa o MagicTouch do MediaPipe no navegador. O primeiro uso baixa o modelo e o runtime do próprio estúdio. Clique no objeto e refine o contorno com o pincel, a borracha ou a proteção. O build baixa e verifica o modelo antes de empacotá-lo.
 

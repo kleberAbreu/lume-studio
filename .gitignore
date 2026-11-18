@@ -11,3 +11,5 @@ next-env.d.ts
 node_modules
 
 public/segmenter/assets/
+
+.lume-gallery/

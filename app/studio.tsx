@@ -3,7 +3,7 @@ import {useEffect,useRef,useState} from 'react';
 import type {FormEvent,ReactNode} from 'react';
 import {Sparkles, PencilLine, ArrowUpRight, ArrowRight, Plus, SlidersHorizontal, Shuffle, Aperture, Check, ChevronDown, Download, History, Maximize2, LoaderCircle, KeyRound, AlignLeft, Layers3, Coins, X, Upload, Unplug, Cable, WandSparkles, Ratio, Images, PanelTop, CircleHelp} from 'lucide-react';
 import {examples} from '../lib/studio/examples';
-import {listVersions, saveVersions, type Version} from '../lib/studio/gallery';
+import {mediaUrl,versionBlob,type Version} from '../lib/studio/gallery';
 import {conversationCost, costLabel, dollars, type Receipt} from '../lib/studio/costs';
 import {CostPanel} from './cost-panel';
 import {RegionPicker} from './region-picker';
@@ -13,6 +13,9 @@ import {VersionCompare} from './version-compare';
 import {BlobImage} from './blob-image';
 import {ReferencePhotos} from './reference-photos';
 import {maxUploadBytes, validImage, type ReferencePhoto} from '../lib/studio/references';
+import {useGallery} from './use-gallery';
+import {SharePanel} from './share-panel';
+import {packDraft,unpackDraft} from '../lib/studio/draft';
 import {FrameEditor} from './frame-editor';
 import {formats, renderFrame, type Frame} from '../lib/studio/framing';
 type Mode='create'|'edit';
@@ -39,7 +42,11 @@ export default function Studio({account}:{account:string}){
   const [selection,setSelection]=useState<{blob:Blob;region:Selection}|null>(null);
   const region=mode==='edit' && selection && selection.blob===reference?.blob ? selection.region : null;
   const attachment=mode==='edit'?reference:print;
-  const [items,setItems]=useState<Version[]>([]),[current,setCurrent]=useState<string|null>(null);
+  const {items,status:syncStatus,ready,refresh,save}=useGallery(account);
+  const [current,setCurrent]=useState<string|null>(null),[share,setShare]=useState<Version|null>(null);
+  const [savingDraft,setSavingDraft]=useState(false);
+  const [search,setSearch]=useState('');
+  const imageSource=(v:Version,thumb=false)=>v.blob ?? mediaUrl(account,v.id,thumb?'thumb':'image');
   const [busy,setBusy]=useState(false),lock=useRef(false);
   const [message,setMessage]=useState(''),[warning,setWarning]=useState(''),[drag,setDrag]=useState(false);
   const [apiOpen,setApiOpen]=useState(false),[help,setHelp]=useState(false),[full,setFull]=useState(false);
@@ -60,13 +67,8 @@ export default function Studio({account}:{account:string}){
   const roots=Array.from(new Set([...items].sort((a,b)=>b.created-a.created).map(v=>v.root)));
   const connected=Boolean(key||serverKey);
   useEffect(()=>{
-    const refresh=()=>listVersions(account).then(rows=>setItems(prev=>[...rows.filter(r=>!prev.some(p=>p.id===r.id)),...prev])).catch(()=>setWarning('O navegador não liberou o histórico local. Baixe as imagens que quiser guardar.'));
-    const sync=typeof BroadcastChannel==='undefined'?null:new BroadcastChannel('lume-versions-'+account);
-    if(sync)sync.onmessage=refresh;
-    void refresh();
-    window.addEventListener('focus',refresh);
     fetch('/img_editor/api/status').then(async r=>await r.json() as {configured?:boolean}).then(v=>setServerKey(Boolean(v.configured))).catch(()=>{});
-    return ()=>{sync?.close();window.removeEventListener('focus',refresh)};
+
   },[]);
   useEffect(()=>{if(message){const timer=setTimeout(()=>setMessage(''),4200);return()=>clearTimeout(timer)}},[message]);
   function receive(blob:File){
@@ -77,20 +79,31 @@ export default function Studio({account}:{account:string}){
     setWarning('');setMessage(mode==='edit'?'Imagem pronta para editar.':'Print de prompt adicionado.');
   }
   useEffect(()=>{
-    function paste(e:ClipboardEvent){if(page!=='studio'||apiOpen||help||example!==null||full||compare||framing||busy)return;const f=Array.from(e.clipboardData?.items||[]).find(i=>i.kind==='file'&&i.type.startsWith('image/'))?.getAsFile();if(f){e.preventDefault();receive(f)}}
+    function paste(e:ClipboardEvent){if(page!=='studio'||apiOpen||help||example!==null||full||compare||framing||share||busy)return;const f=Array.from(e.clipboardData?.items||[]).find(i=>i.kind==='file'&&i.type.startsWith('image/'))?.getAsFile();if(f){e.preventDefault();receive(f)}}
     window.addEventListener('paste',paste);return()=>window.removeEventListener('paste',paste);
   });
   function switchMode(m:Mode){setMode(m);setWarning('')}
   function showStudio(){setPage('studio');setWarning('')}
-  function startEdit(v:Version){
-    const [width, height] = v.size.split('x').map(Number);
-    setSize(v.size in dims ? v.size : (width > height ? '1536x1024' : '1024x1536'));
-    setMode('edit');setPhotos([]);setSelection(null);setReference({blob:v.blob,name:v.title,version:v});setDrafts(x=>({...x,edit:''}));setPage('studio');setFull(false);setWarning('');
-    setTimeout(()=>{area.current?.focus();area.current?.scrollIntoView({behavior:'smooth',block:'center'})},50);
+  async function startEdit(v:Version){
+    if(lock.current)return;
+    lock.current=true;setBusy(true);setWarning('');
+    try {
+      const blob=await versionBlob(account,v);
+      const draft=v.draft?await unpackDraft(await versionBlob(account,v,'state')):null;
+      const [width,height]=v.size.split('x').map(Number);
+      setSize(v.size in dims?v.size:width>height?'1536x1024':'1024x1536');setQuality(v.quality);
+      setMode('edit');setPhotos(draft?.photos??[]);setSelection(draft?.region?{blob,region:draft.region}:null);
+      setReference({blob,name:v.title,version:v});setDrafts(prev=>({...prev,edit:v.draft?v.prompt:''}));
+      setCurrent(v.id);setPage('studio');setFull(false);
+      setTimeout(()=>document.querySelector('.composer')?.scrollIntoView({behavior:'smooth',block:'start'}),60);
+    }catch(e){setMessage(e instanceof Error?e.message:'Não foi possível abrir a edição.')}
+    finally{lock.current=false;setBusy(false)}
   }
   function openVersion(id:string){setCurrent(id);setPage('studio');setTimeout(()=>resultPanel.current?.scrollIntoView({behavior:'smooth',block:'start'}),60)}
   function download(v:Version){
-    const url=URL.createObjectURL(v.blob),a=document.createElement('a');a.href=url;a.download='lume-'+v.id.slice(0,8)+'.'+(v.blob.type.split('/')[1]||'png');a.click();setTimeout(()=>URL.revokeObjectURL(url),6000);
+    const url=v.blob?URL.createObjectURL(v.blob):mediaUrl(account,v.id);
+    const a=document.createElement('a');a.href=url;a.download='lume-'+v.id.slice(0,8)+(v.blob?'.'+v.blob.type.split('/')[1]:'');a.click();
+    if(v.blob)setTimeout(()=>URL.revokeObjectURL(url),6000);
   }
   function openApi(){setKeyDraft('');setConnectError('');setApiOpen(true)}
   async function connect(e:FormEvent){
@@ -127,17 +140,27 @@ export default function Studio({account}:{account:string}){
       const blob=await (await fetch('data:image/png;base64,'+data.image)).blob();
       return {blob, receipt:data.receipt??null};
   }
-  async function saveResult(blob:Blob, description:string, outputSize:string, receipt:Receipt|null, local=false) {
+  async function saveResult(blob:Blob, description:string, outputSize:string, receipt:Receipt|null, local=false, draftFile?:Blob) {
       const now=Date.now(), id=crypto.randomUUID(), pending:Version[]=[];
       let parent=mode==='edit'?reference?.version:undefined;
       if(mode==='edit'&&reference&&!parent){
         const originalId=crypto.randomUUID();parent={id:originalId,root:originalId,created:now-1,prompt:'Imagem enviada para edição.',title:reference.name,size,quality,blob:reference.blob,original:true};pending.push(parent);setReference({...reference,version:parent});
       }
-      const v:Version={id,root:parent?.root||id,parent:parent?.id,created:now,prompt:description,size:outputSize,quality,blob,receipt,local,title:description.length>62?description.slice(0,61)+'…':description};
-      pending.push(v);setItems(prev=>[...prev,...pending]);
-      if(mode==='edit'){setSelection(null);setReference({blob:v.blob,name:v.title,version:v});setDrafts(x=>({...x,edit:''}));}
-      openVersion(v.id);
-      try{await saveVersions(account,pending);if(typeof BroadcastChannel!=='undefined'){const sync=new BroadcastChannel('lume-versions-'+account);sync.postMessage('saved');sync.close()}setMessage('Imagem salva na galeria deste navegador.')}catch{setWarning('Imagem pronta. O histórico local está indisponível. Baixe a imagem para guardá-la.')}
+      const v:Version={id,root:parent?.root||id,parent:parent?.id,created:now,prompt:description,size:outputSize,quality,blob,receipt,local,draft:!!draftFile,draftFile,title:draftFile?(reference?.name??'Rascunho'):description.length>62?description.slice(0,61)+'…':description};
+      pending.push(v);
+      if(mode==='edit'){
+        setReference({blob:v.blob!,name:v.title,version:v});
+        if(!draftFile){setSelection(null);setDrafts(x=>({...x,edit:''}))}
+      }
+      if(!draftFile)openVersion(v.id);else setCurrent(v.id);
+      setMessage(await save(pending));
+  }
+  async function saveDraft(){
+    if(!reference||lock.current||selecting)return;
+    lock.current=true;setBusy(true);setSavingDraft(true);setWarning('');
+    try{await saveResult(reference.blob,prompt,size,null,true,await packDraft(region,photos))}
+    catch(e){setWarning(e instanceof Error?e.message:'Não foi possível salvar o rascunho.')}
+    finally{lock.current=false;setBusy(false);setSavingDraft(false)}
   }
   async function applyFrame(frame:Frame, needsAI:boolean) {
     if (!reference || lock.current) return;
@@ -199,7 +222,7 @@ export default function Studio({account}:{account:string}){
   function useExample(i:number){setMode('create');setDrafts(x=>({...x,create:examples[i].prompt}));setPrint(null);setExample(null);setWarning('');setTimeout(()=>area.current?.focus(),20)}
   return <>
     <header className="top"><div className="top-inner"><button className="brandbtn" aria-label="Lume Studio, início" onClick={showStudio}><Brand/></button>
-      <nav aria-label="Principal"><button className={page==='studio'?'active':''} onClick={showStudio}><PanelTop/>Estúdio</button><button className={page==='gallery'?'active':''} onClick={()=>setPage('gallery')}><Images/>Galeria</button></nav>
+      <nav aria-label="Principal"><button className={page==='studio'?'active':''} onClick={showStudio}><PanelTop/>Estúdio</button><button className={page==='gallery'?'active':''} onClick={()=>{setPage('gallery');void refresh();window.scrollTo(0,0)}}><Images/>Galeria</button></nav>
       <button className="connect" onClick={openApi}><span className={'dot '+(connected?'on':'')}/>{connected?'API conectada':'Conectar API'}<Cable size={15}/></button>
     </div></header>
     <main>
@@ -222,25 +245,43 @@ export default function Studio({account}:{account:string}){
           <div className="options"><label><span><Ratio/>Proporção</span><div className="select"><select disabled={busy || !!region} value={region ? "original" : size} onChange={e=>setSize(e.target.value)}>{region && <option value="original">Original da foto</option>}{Object.entries(dims).map(([k,v])=><option value={k} key={k}>{v}</option>)}</select><ChevronDown/></div></label><label><span><SlidersHorizontal/>Qualidade</span><div className="select"><select disabled={busy} value={quality} onChange={e=>setQuality(e.target.value)}>{Object.entries(qlabels).map(([k,v])=><option value={k} key={k}>{v}</option>)}</select><ChevronDown/></div></label></div>
           <div className="composer-cost"><span><Coins size={15}/>{editingRoot?'Acumulado da conversa':'Nova conversa'}</span><strong>{costLabel(composerCost)}</strong></div>
           {warning&&<p className="error" role="alert">{warning}</p>}
-          <button className="primary generate" disabled={busy||selecting||drawingIdea}>{busy?<LoaderCircle className="spin"/>:<WandSparkles/>}{busy?'Criando sua imagem…':mode==='edit'?(region?'Editar área selecionada':'Aplicar edição'):'Gerar imagem'}<ArrowRight className="end"/></button>
+          <button className="primary generate" disabled={busy||selecting||drawingIdea}>{busy?<LoaderCircle className="spin"/>:<WandSparkles/>}{savingDraft?'Salvando rascunho…':busy?'Preparando imagem…':mode==='edit'?(region?'Editar área selecionada':'Aplicar edição'):'Gerar imagem'}<ArrowRight className="end"/></button>
+          {mode==='edit'&&reference&&<button type="button" className="secondary draft-save" onClick={saveDraft} disabled={busy||selecting}>Salvar rascunho para continuar depois</button>}
         </form></section>
       <aside className="card inspire"><div className="panel-title"><div className="tileicon"><Aperture/></div><div><h2>Inspiração</h2><p>Explore um estilo para começar.</p></div></div>
         <div className="examples">{examples.map((ex,i)=><button key={ex.id} disabled={busy} className="example" onClick={()=>setExample(i)}><img src={'/img_editor/art/'+ex.id+'.webp'} alt=""/><div className="ex-label"><small>{ex.category}</small><b>{ex.title}</b></div><span className="ex-arrow"><ArrowUpRight/></span></button>)}</div>
       </aside></div>
-      {selected&&<section ref={resultPanel} className="card result"><div className="result-header"><div><p className="eyebrow">RESULTADO</p><h2>{selected.original?'Imagem original':'Sua imagem'}</h2></div><div className="mask-tools">{parentVersion&&<button className="secondary" onClick={()=>setCompare(true)}>Comparar antes/depois</button>}<button className="secondary" onClick={()=>download(selected)}><Download/>Baixar</button></div></div><div className="result-layout"><button className="canvas" onClick={()=>setFull(true)} aria-label="Ampliar imagem"><BlobImage blob={selected.blob} alt={selected.prompt}/><Maximize2/></button><div className="details"><CostPanel version={selected} family={family}/><h3><History/>Histórico de versões</h3><p>Escolha uma versão para continuar a edição.</p><div className="versions">{family.map((v,i)=><button key={v.id} className={selected.id===v.id?'chosen':''} onClick={()=>setCurrent(v.id)}><span><BlobImage blob={v.blob} alt=""/></span><div><b>{v.original?'Original':'Versão '+(i+1)}</b><small>{v.parent?'A partir de V'+(family.findIndex(x=>x.id===v.parent)+1):'Ponto de partida'}</small></div><small className="version-amount">{v.original?'Envio local':v.local?'Edição local':v.receipt?dollars(v.receipt.nanoUsd):'Sem dados'}</small>{selected.id===v.id&&<Check size={16}/>}</button>)}</div><p className="versionprompt">{selected.prompt}</p><button disabled={busy} className="primary" onClick={()=>startEdit(selected)}><PencilLine/>Editar esta versão</button></div></div></section>}
-    </>:<><div className="gallery-head"><span className="modeltag"><Layers3 size={13}/>HISTÓRICO LOCAL</span><h1>Minha galeria</h1><p>Suas criações e versões salvas neste navegador.</p></div>
-    {roots.length?<div className="gallery">{roots.map(root=>{const group=items.filter(v=>v.root===root).sort((a,b)=>b.created-a.created);const v=group[0];const title=group.find(image=>image.id===root)?.title||v.title;return <button key={root} className="card gallery-item" onClick={()=>openVersion(v.id)}><BlobImage blob={v.blob} alt={v.title}/><div><small>{group.length} {group.length===1?'versão':'versões'} · {date(v.created)}</small><h3>{title}</h3><div className="gallery-cost"><span><Coins size={13}/>Custo estimado</span><strong>{costLabel(conversationCost(group))}</strong></div></div></button>})}</div>:<div className="card empty"><Images size={35}/><h2>Sua galeria começa aqui</h2><p>As imagens que você gerar e editar aparecerão aqui.</p><button className="primary" onClick={showStudio}><Plus/>Criar imagem</button></div>}</>}
+      {selected&&<section ref={resultPanel} className="card result"><div className="result-header"><div><p className="eyebrow">RESULTADO</p><h2>{selected.draft?'Rascunho':selected.original?'Imagem original':'Sua imagem'}</h2></div><div className="mask-tools"><button className="secondary" disabled={!ready.has(selected.id)} onClick={()=>setShare(selected)}>Compartilhar</button>{parentVersion&&<button className="secondary" onClick={()=>setCompare(true)}>Comparar antes/depois</button>}<button className="secondary" onClick={()=>download(selected)}><Download/>Baixar</button></div></div><div className="result-layout"><button className="canvas" onClick={()=>setFull(true)} aria-label="Ampliar imagem"><BlobImage blob={imageSource(selected)} alt={selected.prompt}/><Maximize2/></button><div className="details"><CostPanel version={selected} family={family}/><h3><History/>Histórico de versões</h3><p>Escolha uma versão para continuar a edição.</p><div className="versions">{family.map((v,i)=><button key={v.id} className={selected.id===v.id?'chosen':''} onClick={()=>setCurrent(v.id)}><span><BlobImage blob={imageSource(v,true)} alt=""/></span><div><b>{v.draft?'Rascunho '+(i+1):v.original?'Original':'Versão '+(i+1)}</b><small>{v.parent?'A partir de V'+(family.findIndex(x=>x.id===v.parent)+1):'Ponto de partida'}</small></div><small className="version-amount">{v.original?'Envio local':v.local?'Edição local':v.receipt?dollars(v.receipt.nanoUsd):'Sem dados'}</small>{selected.id===v.id&&<Check size={16}/>}</button>)}</div><p className="versionprompt">{selected.prompt}</p><button disabled={busy} className="primary" onClick={()=>startEdit(selected)}><PencilLine/>{selected.draft?'Continuar rascunho':'Editar esta versão'}</button></div></div></section>}
+    </>:<>
+      <div className="gallery-head"><div><h1>Minha galeria</h1><p>Projetos de {account}</p></div>
+        <button className="secondary" onClick={()=>void refresh()}>Atualizar galeria</button></div>
+      <div className="gallery-toolbar"><span role="status">{syncStatus}</span>
+        {roots.length>0&&<input type="search" aria-label="Buscar projeto" placeholder="Buscar projeto" value={search} onChange={e=>setSearch(e.target.value)}/>}</div>
+      {roots.length ? <div className="gallery">{roots.map(root=>{
+        const group=items.filter(v=>v.root===root).sort((a,b)=>b.created-a.created||b.id.localeCompare(a.id));
+        const v=group[0], title=group.find(row=>row.id===root)?.title||v.title;
+        if(!title.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))return null;
+        return <article key={root} className="card project-card">
+          <button className="gallery-item" onClick={()=>openVersion(v.id)} aria-label={'Abrir projeto '+title}>
+            <BlobImage blob={imageSource(v,true)} alt=""/><div><small>{group.length} {group.length===1?'versão':'versões'} · {date(v.created)}</small>
+            <h3>{title}</h3><div className="gallery-cost"><span>Custo estimado</span><strong>{costLabel(conversationCost(group))}</strong></div></div></button>
+          <div className="project-actions"><button className="primary" disabled={busy} onClick={()=>startEdit(v)}>Continuar edição</button>
+            <button className="secondary" disabled={!ready.has(v.id)} onClick={()=>setShare(v)}>Compartilhar</button></div></article>;
+      })}</div>:syncStatus==='Carregando galeria…'?null:<div className="card empty"><Images size={35}/><h2>Sua galeria começa aqui</h2><p>Salve um rascunho ou crie sua primeira imagem.</p><button className="primary" onClick={showStudio}><Plus/>Criar imagem</button></div>}
+      {roots.length>0 && search.trim() && !roots.some(root=>items.find(v=>v.id===root)?.title.toLowerCase().includes(search.trim().toLowerCase())) && <p className="empty">Nenhum projeto encontrado.</p>}
+    </>}
     <footer><form method="post" action="/img_editor/api/logout"><button>Sair · {account}</button></form><span><span className="footer-mark">✧</span>Lume Studio</span><button onClick={()=>setHelp(true)}><CircleHelp size={14}/>Como funciona</button></footer>
     </main>
     {message&&<div className="toast" role="status"><Check size={16}/>{message}</div>}
+    {share&&<Dialog title="Compartilhar" onClose={()=>setShare(null)}><SharePanel account={account} version={share}/></Dialog>}
     {framing&&reference&&<Dialog wide title="Enquadrar foto" onClose={()=>{if(!lock.current)setFraming(false)}}>
       <FrameEditor blob={reference.blob} busy={busy} error={frameError} onApply={applyFrame}/>
     </Dialog>}
     {apiOpen&&<Dialog title="Conexão com a OpenAI" onClose={()=>{if(!checking){setApiOpen(false);setKeyDraft('')}}}><p>Use uma chave de projeto com acesso ao GPT Image 2.6 Sunburst. Cada geração ou edição usa os créditos desse projeto.</p>{serverKey?<div className="note"><Check/>O servidor já tem uma chave configurada.</div>:null}
     <form onSubmit={connect}><label className="modal-label" htmlFor="secret">Chave da API</label><input id="secret" type="password" autoComplete="off" value={keyDraft} placeholder="sk-…" required disabled={checking} onChange={e=>setKeyDraft(e.target.value)}/><small>A chave fica em memória nesta aba e segue ao servidor somente para acessar a OpenAI. Ao recarregar, ela é descartada.</small>{connectError&&<p role="alert" className="error">{connectError}</p>}<button className="primary" disabled={checking}>{checking?<LoaderCircle className="spin"/>:<KeyRound/>}{checking?'Verificando…':key?'Trocar chave':'Conectar chave'}</button></form><div className="dialog-links"><a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">Gerenciar chaves <ArrowUpRight size={14}/></a>{key&&<button onClick={()=>{setKey('');setKeyDraft('');setApiOpen(false);setMessage('Chave da sessão removida.')}}><Unplug size={14}/>Desconectar</button>}</div></Dialog>}
     {example!==null&&<Dialog title={examples[example].title} onClose={()=>setExample(null)}><img className="samplelarge" src={'/img_editor/art/'+examples[example].id+'.webp'} alt={examples[example].title}/><p>{examples[example].prompt}</p><button className="primary" onClick={()=>useExample(example)}><Sparkles/>Usar este prompt</button></Dialog>}
-    {help&&<Dialog title="Como usar o estúdio" onClose={()=>setHelp(false)}><p><strong>Gerar.</strong> Escreva o que deseja criar ou adicione um print de uma conversa com o prompt. Você também pode colar um print diretamente na página.</p><p><strong>Editar.</strong> Envie a foto principal e descreva as mudanças. Você pode anexar fotos de referência e indicar quais devem orientar o rosto, a roupa ou o estilo. Para refinar um resultado, selecione “Editar esta versão”.</p><p><strong>Explorar versões.</strong> Abra uma criação na galeria e escolha qualquer versão do histórico para iniciar uma nova variação.</p><p><strong>Custos em dólares.</strong> Cada criação inicia uma conversa. O total soma a geração e todas as suas edições, inclusive variações de versões anteriores. O contador usa o consumo informado nas imagens concluídas e as tarifas padrão do modelo. Consulte o faturamento da OpenAI para créditos, descontos ou pedidos interrompidos.</p><p><strong>Guardar.</strong> A galeria fica neste navegador. Use “Baixar” para guardar uma cópia do arquivo.</p></Dialog>}
-    {compare&&selected&&parentVersion&&<Dialog wide title="Antes e depois" onClose={()=>setCompare(false)}><VersionCompare before={parentVersion.blob} after={selected.blob}/></Dialog>}
-    {full&&selected&&<Dialog title={selected.original?'Imagem original':'Visualização da imagem'} wide onClose={()=>setFull(false)}><div className="full"><BlobImage blob={selected.blob} alt={selected.prompt}/></div><button className="secondary" onClick={()=>download(selected)}><Download/>Baixar imagem</button></Dialog>}
+    {help&&<Dialog title="Como usar o estúdio" onClose={()=>setHelp(false)}><p><strong>Gerar.</strong> Escreva o que deseja criar ou adicione um print de uma conversa com o prompt. Você também pode colar um print diretamente na página.</p><p><strong>Editar.</strong> Envie a foto principal e descreva as mudanças. Você pode anexar fotos de referência e indicar quais devem orientar o rosto, a roupa ou o estilo. Para refinar um resultado, selecione “Editar esta versão”.</p><p><strong>Explorar versões.</strong> Abra uma criação na galeria e escolha qualquer versão do histórico para iniciar uma nova variação.</p><p><strong>Custos em dólares.</strong> Cada criação inicia uma conversa. O total soma a geração e todas as suas edições, inclusive variações de versões anteriores. O contador usa o consumo informado nas imagens concluídas e as tarifas padrão do modelo. Consulte o faturamento da OpenAI para créditos, descontos ou pedidos interrompidos.</p><p><strong>Guardar.</strong> As versões são sincronizadas com a sua conta. Para retomar uma edição em andamento em outro aparelho, use “Salvar rascunho” e abra “Continuar edição” na galeria.</p></Dialog>}
+    {compare&&selected&&parentVersion&&<Dialog wide title="Antes e depois" onClose={()=>setCompare(false)}><VersionCompare before={imageSource(parentVersion)} after={imageSource(selected)}/></Dialog>}
+    {full&&selected&&<Dialog title={selected.original?'Imagem original':'Visualização da imagem'} wide onClose={()=>setFull(false)}><div className="full"><BlobImage blob={imageSource(selected)} alt={selected.prompt}/></div><button className="secondary" onClick={()=>download(selected)}><Download/>Baixar imagem</button></Dialog>}
   </>
 }

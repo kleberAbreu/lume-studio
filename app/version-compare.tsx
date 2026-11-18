@@ -1,12 +1,12 @@
 'use client';
 import {useEffect,useRef,useState} from 'react';
 
-export function VersionCompare({before,after}:{before:Blob;after:Blob}) {
+export function VersionCompare({before,after}:{before:Blob|string;after:Blob|string}) {
   const [urls,setUrls]=useState<string[]>([]), [split,setSplit]=useState(50), [zoom,setZoom]=useState(1);
   const frame=useRef<HTMLDivElement>(null);
   useEffect(()=>{
-    const pair=[URL.createObjectURL(before),URL.createObjectURL(after)];
-    setUrls(pair); return ()=>pair.forEach(URL.revokeObjectURL);
+    const pair=[before,after].map(v=>typeof v==='string'?v:URL.createObjectURL(v));
+    setUrls(pair); return ()=>pair.filter(v=>v.startsWith('blob:')).forEach(URL.revokeObjectURL);
   },[before,after]);
   function slide(clientX:number){
     const box=frame.current!.getBoundingClientRect();

@@ -3,5 +3,12 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env
+    environment:
+      LUME_GALLERY_DIR: /app/gallery
+    volumes:
+      - gallery:/app/gallery
     ports:
       - "127.0.0.1:${LUME_PORT:-3137}:3000"
+
+volumes:
+  gallery:

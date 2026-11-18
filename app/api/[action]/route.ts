@@ -1,6 +1,7 @@
 import {NextRequest, NextResponse} from 'next/server';
 import {basePath,cookieName,issueSession,lifetime,sessionUser,verifyPassword} from '../../../lib/access.mjs';
 import {handleStudio} from '../../../lib/studio/api.mjs';
+import {galleryApi} from '../../../lib/gallery/api.mjs';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
 export const maxDuration=300;
@@ -31,6 +32,7 @@ async function handle(req:NextRequest,{params}:{params:Promise<{action:string}>}
   const user=sessionUser(req.cookies.get(cookieName)?.value,process.env);
   if(!user)return reject('Sua sessão expirou. Reabra o editor e entre novamente.',401);
   if(req.method==='POST' && req.headers.get('x-lume-account')!==user)return reject('A conta desta aba mudou. Recarregue a página para continuar.',409);
+  if(action==='gallery') return galleryApi(req,user);
   return handleStudio(new Request(new URL('/api/'+action,home.origin),req),{OPENAI_API_KEY:process.env.OPENAI_API_KEY});
 }
 export {handle as GET, handle as POST};

@@ -13,6 +13,7 @@ COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/.next ./.next
 COPY --from=build --chown=node:node /app/public ./public
 COPY --from=build --chmod=0444 /app/package*.json /app/next.config.mjs ./
+RUN install -d -m 700 -o node -g node /app/gallery
 USER node
 EXPOSE 3000
 CMD ["npm","start"]

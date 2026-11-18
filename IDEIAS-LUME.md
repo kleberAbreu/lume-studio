@@ -14,7 +14,7 @@
 
 5. **Enquadramento e expansão.** Preparar uma foto para feed 4:5, story 9:16 ou wallpaper. Posicionar a imagem e escolher entre recortar e preencher as margens com IA, preservando a geometria do conteúdo original.
 
-## Próximas possibilidades
+## Galeria e compartilhamento
 
 6. **Galeria sincronizada.** Salvar projetos privados por conta no VPS para continuar no celular uma edição iniciada no Mac. Permitir compartilhar uma foto ou projeto específico com outra pessoa.
 
