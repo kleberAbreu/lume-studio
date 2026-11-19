@@ -20,6 +20,8 @@ Ao abrir o estúdio no navegador e no domínio em que as imagens antigas foram c
 
 **Sortear ideia** usa a chave da sessão ou do servidor para gerar um prompt em português com GPT-6.2 Sol. Cada clique usa créditos de texto. O painel de custos acompanha as operações de imagem.
 
+**Ditar** insere a fala em português no campo do prompt ou das instruções de edição. Toque para gravar até 60 segundos e em **Concluir** para transcrever com `gpt-transcribe` usando a chave conectada. Revise o texto antes de gerar ou aplicar a edição. Em caso de falha de conexão, a aba mantém o áudio em memória para reenvio. O Lume não armazena a gravação na galeria ou em disco.
+
 ## Desenvolvimento
 
 Com Node.js 24, execute `npm ci`, configure o ambiente em `.env.local` e execute `npm run dev`. Para verificar, rode `npm test` e `npm run build`. O diretório `lib/studio` contém a integração da API, o cálculo de custos e a persistência da galeria.

@@ -21,3 +21,7 @@
 ## Seleção assistida
 
 7. **Seleção de objeto com um clique.** Tocar em uma camiseta, uma raquete ou uma pessoa para obter uma sugestão de contorno. Refinar o resultado com o mesmo pincel antes de enviar o comando.
+
+## Entrada por voz
+
+8. **Ditado em português (implementado).** Ditar o prompt de criação ou as instruções de edição, revisar o texto e complementar com a voz ou o teclado. O texto pode ser salvo com o rascunho na galeria.

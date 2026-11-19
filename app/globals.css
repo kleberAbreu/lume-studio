@@ -74,3 +74,11 @@ dialog{width:min(450px,calc(100% - 28px));max-height:90dvh;overflow:auto;padding
   .project-actions button {flex:1}.gallery-toolbar input {width:100%}
   .result-header .mask-tools {width:100%}.result-header .secondary {min-height:44px}
 }
+
+.dictation {padding:0 12px 5px}
+.dictation-actions {display:flex;align-items:center;flex-wrap:wrap;gap:0 10px}
+.dictation-actions button,.dictation-actions span {display:inline-flex;align-items:center;gap:6px;font-size:.84rem}
+.dictation-actions button {min-height:44px;padding:0 10px;border:1px solid var(--line);border-radius:9px;background:transparent;color:inherit}
+.dictation-actions svg {width:16px;height:16px}
+.dictation-actions [role=timer] {font-variant-numeric:tabular-nums}
+.dictation p {margin:5px 0;font-size:.84rem;line-height:1.4}

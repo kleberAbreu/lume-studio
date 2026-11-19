@@ -5,6 +5,7 @@ import {Sparkles, PencilLine, ArrowUpRight, ArrowRight, Plus, SlidersHorizontal,
 import {examples} from '../lib/studio/examples';
 import {mediaUrl,versionBlob,type Version} from '../lib/studio/gallery';
 import {conversationCost, costLabel, dollars, type Receipt} from '../lib/studio/costs';
+import {Dictation} from './dictation';
 import {CostPanel} from './cost-panel';
 import {RegionPicker} from './region-picker';
 import {prepareRegion} from '../lib/studio/region';
@@ -52,6 +53,7 @@ export default function Studio({account}:{account:string}){
   const [apiOpen,setApiOpen]=useState(false),[help,setHelp]=useState(false),[full,setFull]=useState(false);
   const [key,setKey]=useState(''),[keyDraft,setKeyDraft]=useState(''),[serverKey,setServerKey]=useState(false);
   const [checking,setChecking]=useState(false),[connectError,setConnectError]=useState('');
+  const [dictating,setDictating]=useState(false);
   const [drawingIdea,setDrawingIdea]=useState(false);
   const ideaRequest=useRef<AbortController|null>(null),recentIdeas=useRef<string[]>([]);
   useEffect(()=>()=>{ideaRequest.current?.abort()},[mode,page]);
@@ -72,7 +74,7 @@ export default function Studio({account}:{account:string}){
   },[]);
   useEffect(()=>{if(message){const timer=setTimeout(()=>setMessage(''),4200);return()=>clearTimeout(timer)}},[message]);
   function receive(blob:File){
-    if(busy)return;
+    if(busy||dictating)return;
     if(!validImage(blob)){setWarning('Escolha um PNG, JPEG ou WebP de até 20 MB.');return}
     const next={blob,name:blob.name||'Imagem colada'};
     if(mode==='edit'){setSelection(null);setPhotos([]);setReference(next)}else setPrint(next);
@@ -85,7 +87,7 @@ export default function Studio({account}:{account:string}){
   function switchMode(m:Mode){setMode(m);setWarning('')}
   function showStudio(){setPage('studio');setWarning('')}
   async function startEdit(v:Version){
-    if(lock.current)return;
+    if(lock.current||dictating)return;
     lock.current=true;setBusy(true);setWarning('');
     try {
       const blob=await versionBlob(account,v);
@@ -112,7 +114,7 @@ export default function Studio({account}:{account:string}){
     catch(e){setConnectError(e instanceof Error?e.message:'Não foi possível conectar.')}finally{setChecking(false)}
   }
   async function drawIdea() {
-    if (ideaRequest.current || busy) return;
+    if (ideaRequest.current || busy || dictating) return;
     if (!connected) {openApi();return}
     const controller=new AbortController();
     ideaRequest.current=controller;
@@ -156,7 +158,7 @@ export default function Studio({account}:{account:string}){
       setMessage(await save(pending));
   }
   async function saveDraft(){
-    if(!reference||lock.current||selecting)return;
+    if(!reference||lock.current||selecting||dictating)return;
     lock.current=true;setBusy(true);setSavingDraft(true);setWarning('');
     try{await saveResult(reference.blob,prompt,size,null,true,await packDraft(region,photos))}
     catch(e){setWarning(e instanceof Error?e.message:'Não foi possível salvar o rascunho.')}
@@ -191,7 +193,7 @@ export default function Studio({account}:{account:string}){
     } finally {lock.current=false;setBusy(false)}
   }
   async function run(e:FormEvent){
-    e.preventDefault();if(lock.current||selecting||drawingIdea)return;setWarning('');
+    e.preventDefault();if(lock.current||selecting||drawingIdea||dictating)return;setWarning('');
     if(mode==='edit'&&!reference){setWarning('Adicione a imagem que deseja editar.');return}
     if(!prompt.trim()&&!(mode==='create'&&print)){setWarning(mode==='edit'?'Descreva a alteração que deseja fazer.':'Escreva um prompt ou adicione um print da conversa.');area.current?.focus();return}
     if(!connected){openApi();return}
@@ -233,25 +235,27 @@ export default function Studio({account}:{account:string}){
         <div className="tabs"><button disabled={busy} aria-pressed={mode==='create'} className={mode==='create'?'selected':''} onClick={()=>switchMode('create')}><Sparkles/>Gerar imagem</button><button disabled={busy} aria-pressed={mode==='edit'} className={mode==='edit'?'selected':''} onClick={()=>switchMode('edit')}><PencilLine/>Editar imagem</button></div>
         <form onSubmit={run} onDragOver={e=>{e.preventDefault();setDrag(true)}} onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node))setDrag(false)}} onDrop={e=>{e.preventDefault();setDrag(false);if(e.dataTransfer.files[0])receive(e.dataTransfer.files[0])}} className={drag?'drag':''}>
           <input type="file" accept="image/png,image/jpeg,image/webp" ref={file} hidden onChange={e=>{if(e.target.files?.[0])receive(e.target.files[0]);e.target.value=''}}/>
-          {mode==='edit'&&!reference&&<button type="button" className="upload" onClick={()=>file.current?.click()} disabled={busy}><Upload size={18}/>Enviar ou colar foto principal <small>PNG, JPG, WebP · até 20 MB</small></button>}
+          {mode==='edit'&&!reference&&<button type="button" className="upload" onClick={()=>file.current?.click()} disabled={busy||dictating}><Upload size={18}/>Enviar ou colar foto principal <small>PNG, JPG, WebP · até 20 MB</small></button>}
           {mode==='edit' && reference && <button type="button" disabled={busy} className="secondary frame-open"
             onClick={()=>{setFrameError('');setFraming(true)}}><Ratio/>Enquadrar foto</button>}
           {mode==='edit' && reference && <RegionPicker onPending={setSelecting} blob={reference.blob} region={region} disabled={busy} onChange={value=>setSelection(value ? {blob:reference.blob, region:value} : null)}/>}
           {mode==='edit' && reference && <ReferencePhotos photos={photos} disabled={busy} onChange={setPhotos} onWarning={setWarning}/>}
-          <div className="field-title"><label htmlFor="prompt"><AlignLeft/>{mode==='edit'?(region?'Instruções para a área selecionada':'Instruções de edição'):'Seu prompt'}</label>{mode==='create'&&<button className="idea" type="button" disabled={busy||drawingIdea} onClick={drawIdea}
+          <div className="field-title"><label htmlFor="prompt"><AlignLeft/>{mode==='edit'?(region?'Instruções para a área selecionada':'Instruções de edição'):'Seu prompt'}</label>{mode==='create'&&<button className="idea" type="button" disabled={busy||drawingIdea||dictating} onClick={drawIdea}
             title="Gerar uma sugestão com GPT-6.2 Sol">{drawingIdea?<LoaderCircle className="spin"/>:<Shuffle/>}{drawingIdea?'Sorteando…':'Sortear ideia'}</button>}</div>
           <div className="prompt-box"><textarea id="prompt" ref={area} value={prompt} maxLength={12000} disabled={busy} onChange={e=>setPrompt(e.target.value)} placeholder={mode==='edit'?'O que você gostaria de mudar nesta imagem?':print?'Acrescente detalhes ao pedido do print (opcional)…':'Descreva a imagem que você imagina…'} onKeyDown={e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();e.currentTarget.form?.requestSubmit()}}}/>
-          <div className="prompt-tools">{attachment?<div className="attached"><BlobImage blob={attachment.blob} alt={mode==='edit'?'Foto principal':'Print anexado'}/><span>{mode==='edit'?'Principal · ':''}{attachment.name}</span><button type="button" disabled={busy} aria-label="Remover anexo" onClick={()=>{if(mode==='edit'){setReference(null);setPhotos([]);setSelection(null)}else setPrint(null)}}><X size={13}/></button></div>:<button type="button" className="attach" disabled={busy} onClick={()=>file.current?.click()}><Plus size={14}/>{mode==='create'?'Adicionar print':'Adicionar imagem'}</button>}<small>{prompt.length.toLocaleString('pt-BR')} / 12.000</small></div></div>
+          {!apiOpen && !help && !full && !compare && !framing && !share && example===null && <Dictation key={mode} account={account} apiKey={key} disabled={busy||drawingIdea} area={area}
+            onChange={setPrompt} onActive={setDictating} ensureConnected={()=>{if(!connected)openApi();return connected}}/>}
+          <div className="prompt-tools">{attachment?<div className="attached"><BlobImage blob={attachment.blob} alt={mode==='edit'?'Foto principal':'Print anexado'}/><span>{mode==='edit'?'Principal · ':''}{attachment.name}</span><button type="button" disabled={busy||dictating} aria-label="Remover anexo" onClick={()=>{if(mode==='edit'){setReference(null);setPhotos([]);setSelection(null)}else setPrint(null)}}><X size={13}/></button></div>:<button type="button" className="attach" disabled={busy||dictating} onClick={()=>file.current?.click()}><Plus size={14}/>{mode==='create'?'Adicionar print':'Adicionar imagem'}</button>}<small>{prompt.length.toLocaleString('pt-BR')} / 12.000</small></div></div>
           <div className="options"><label><span><Ratio/>Proporção</span><div className="select"><select disabled={busy || !!region} value={region ? "original" : size} onChange={e=>setSize(e.target.value)}>{region && <option value="original">Original da foto</option>}{Object.entries(dims).map(([k,v])=><option value={k} key={k}>{v}</option>)}</select><ChevronDown/></div></label><label><span><SlidersHorizontal/>Qualidade</span><div className="select"><select disabled={busy} value={quality} onChange={e=>setQuality(e.target.value)}>{Object.entries(qlabels).map(([k,v])=><option value={k} key={k}>{v}</option>)}</select><ChevronDown/></div></label></div>
           <div className="composer-cost"><span><Coins size={15}/>{editingRoot?'Acumulado da conversa':'Nova conversa'}</span><strong>{costLabel(composerCost)}</strong></div>
           {warning&&<p className="error" role="alert">{warning}</p>}
-          <button className="primary generate" disabled={busy||selecting||drawingIdea}>{busy?<LoaderCircle className="spin"/>:<WandSparkles/>}{savingDraft?'Salvando rascunho…':busy?'Preparando imagem…':mode==='edit'?(region?'Editar área selecionada':'Aplicar edição'):'Gerar imagem'}<ArrowRight className="end"/></button>
-          {mode==='edit'&&reference&&<button type="button" className="secondary draft-save" onClick={saveDraft} disabled={busy||selecting}>Salvar rascunho para continuar depois</button>}
+          <button className="primary generate" disabled={busy||selecting||drawingIdea||dictating}>{busy?<LoaderCircle className="spin"/>:<WandSparkles/>}{savingDraft?'Salvando rascunho…':busy?'Preparando imagem…':mode==='edit'?(region?'Editar área selecionada':'Aplicar edição'):'Gerar imagem'}<ArrowRight className="end"/></button>
+          {mode==='edit'&&reference&&<button type="button" className="secondary draft-save" onClick={saveDraft} disabled={busy||selecting||dictating}>Salvar rascunho para continuar depois</button>}
         </form></section>
       <aside className="card inspire"><div className="panel-title"><div className="tileicon"><Aperture/></div><div><h2>Inspiração</h2><p>Explore um estilo para começar.</p></div></div>
         <div className="examples">{examples.map((ex,i)=><button key={ex.id} disabled={busy} className="example" onClick={()=>setExample(i)}><img src={'/img_editor/art/'+ex.id+'.webp'} alt=""/><div className="ex-label"><small>{ex.category}</small><b>{ex.title}</b></div><span className="ex-arrow"><ArrowUpRight/></span></button>)}</div>
       </aside></div>
-      {selected&&<section ref={resultPanel} className="card result"><div className="result-header"><div><p className="eyebrow">RESULTADO</p><h2>{selected.draft?'Rascunho':selected.original?'Imagem original':'Sua imagem'}</h2></div><div className="mask-tools"><button className="secondary" disabled={!ready.has(selected.id)} onClick={()=>setShare(selected)}>Compartilhar</button>{parentVersion&&<button className="secondary" onClick={()=>setCompare(true)}>Comparar antes/depois</button>}<button className="secondary" onClick={()=>download(selected)}><Download/>Baixar</button></div></div><div className="result-layout"><button className="canvas" onClick={()=>setFull(true)} aria-label="Ampliar imagem"><BlobImage blob={imageSource(selected)} alt={selected.prompt}/><Maximize2/></button><div className="details"><CostPanel version={selected} family={family}/><h3><History/>Histórico de versões</h3><p>Escolha uma versão para continuar a edição.</p><div className="versions">{family.map((v,i)=><button key={v.id} className={selected.id===v.id?'chosen':''} onClick={()=>setCurrent(v.id)}><span><BlobImage blob={imageSource(v,true)} alt=""/></span><div><b>{v.draft?'Rascunho '+(i+1):v.original?'Original':'Versão '+(i+1)}</b><small>{v.parent?'A partir de V'+(family.findIndex(x=>x.id===v.parent)+1):'Ponto de partida'}</small></div><small className="version-amount">{v.original?'Envio local':v.local?'Edição local':v.receipt?dollars(v.receipt.nanoUsd):'Sem dados'}</small>{selected.id===v.id&&<Check size={16}/>}</button>)}</div><p className="versionprompt">{selected.prompt}</p><button disabled={busy} className="primary" onClick={()=>startEdit(selected)}><PencilLine/>{selected.draft?'Continuar rascunho':'Editar esta versão'}</button></div></div></section>}
+      {selected&&<section ref={resultPanel} className="card result"><div className="result-header"><div><p className="eyebrow">RESULTADO</p><h2>{selected.draft?'Rascunho':selected.original?'Imagem original':'Sua imagem'}</h2></div><div className="mask-tools"><button className="secondary" disabled={!ready.has(selected.id)} onClick={()=>setShare(selected)}>Compartilhar</button>{parentVersion&&<button className="secondary" onClick={()=>setCompare(true)}>Comparar antes/depois</button>}<button className="secondary" onClick={()=>download(selected)}><Download/>Baixar</button></div></div><div className="result-layout"><button className="canvas" onClick={()=>setFull(true)} aria-label="Ampliar imagem"><BlobImage blob={imageSource(selected)} alt={selected.prompt}/><Maximize2/></button><div className="details"><CostPanel version={selected} family={family}/><h3><History/>Histórico de versões</h3><p>Escolha uma versão para continuar a edição.</p><div className="versions">{family.map((v,i)=><button key={v.id} className={selected.id===v.id?'chosen':''} onClick={()=>setCurrent(v.id)}><span><BlobImage blob={imageSource(v,true)} alt=""/></span><div><b>{v.draft?'Rascunho '+(i+1):v.original?'Original':'Versão '+(i+1)}</b><small>{v.parent?'A partir de V'+(family.findIndex(x=>x.id===v.parent)+1):'Ponto de partida'}</small></div><small className="version-amount">{v.original?'Envio local':v.local?'Edição local':v.receipt?dollars(v.receipt.nanoUsd):'Sem dados'}</small>{selected.id===v.id&&<Check size={16}/>}</button>)}</div><p className="versionprompt">{selected.prompt}</p><button disabled={busy||dictating} className="primary" onClick={()=>startEdit(selected)}><PencilLine/>{selected.draft?'Continuar rascunho':'Editar esta versão'}</button></div></div></section>}
     </>:<>
       <div className="gallery-head"><div><h1>Minha galeria</h1><p>Projetos de {account}</p></div>
         <button className="secondary" onClick={()=>void refresh()}>Atualizar galeria</button></div>
