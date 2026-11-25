@@ -32,6 +32,7 @@ function clearMask(){ink.clearRect(0,0,1024,1024);shape.globalCompositeOperation
 function split(){const n=$('slider').value;$('after').style.clipPath='inset(0 0 0 '+n+'%)';$('divider').style.left=n+'%'}
 function view(compare){
   showing=!!(compare&&result&&original&&mode==='edit');
+  $('frame').classList.toggle('comparing',showing);
   $('after').hidden=!showing;$('divider').hidden=!showing;$('compareLabels').hidden=!showing;$('sliderRow').hidden=!showing;
   $('base').hidden=!original&&!(mode==='create'&&result);
   if(!$('base').hidden)$('base').src=original||result;else $('base').removeAttribute('src');
@@ -57,6 +58,22 @@ $('edit').onclick=()=>{if(mode!=='edit')select(current||examples[0])};
 $('create').onclick=()=>{if(mode==='create')return;loadToken++;mode='create';clearMask();original=null;result=null;upload=null;$('prompt').value='';$('scene').textContent='Nova imagem';announce('');view(false)};
 $('preview').onclick=()=>{paint=false;view(!showing)};
 $('slider').oninput=split;
+const frame=$('frame');
+let sliding=null;
+function moveDivider(event){
+  const bounds=frame.getBoundingClientRect();
+  const position=Math.round(100*(event.clientX-bounds.left)/bounds.width);
+  $('slider').value=String(Math.max(0,Math.min(100,position)));
+  split();
+}
+frame.addEventListener('pointerdown',event=>{
+  if(!showing||event.button!==0)return;
+  sliding=event.pointerId;
+  frame.setPointerCapture(sliding);
+  moveDivider(event);
+});
+frame.addEventListener('pointermove',event=>{if(event.pointerId===sliding)moveDivider(event)});
+frame.addEventListener('lostpointercapture',()=>{sliding=null});
 $('brush').onclick=()=>{paint=!paint;controls();if(paint)announce('Passe o pincel sobre a área que deseja editar.')};
 $('clear').onclick=()=>{clearMask();controls();announce('Seleção removida.')};
 function point(e){const r=canvas.getBoundingClientRect();return [(e.clientX-r.left)*1024/r.width,(e.clientY-r.top)*1024/r.height]}
