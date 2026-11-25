@@ -1,0 +1,27 @@
+[Unit]
+Description=Lume Studio public demonstration
+After=network-online.target
+[Service]
+DynamicUser=yes
+User=lume-demo
+StateDirectory=lume-demo
+StateDirectoryMode=0700
+LoadCredential=api-key:/etc/lume-demo/api-key
+LoadCredential=ip-pepper:/etc/lume-demo/ip-pepper
+WorkingDirectory=/opt/lume-demo/current
+ExecStart=/usr/bin/node demo/server.mjs
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CPUQuota=100%
+MemoryMax=500M
+Restart=on-failure
+RestartSec=3
+[Install]
+WantedBy=multi-user.target
